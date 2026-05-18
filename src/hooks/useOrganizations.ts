@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { Organization, OrganizationCreate, OrganizationUpdate } from "@/types/api";
+import type {
+  Organization,
+  OrganizationCreate,
+  OrganizationDeleteResult,
+  OrganizationDeleteSummary,
+  OrganizationUpdate,
+} from "@/types/api";
 
 export function useOrganizations(enabled = true) {
   return useQuery({
@@ -27,10 +33,23 @@ export function useUpdateOrganization() {
   });
 }
 
+export function useOrganizationDeletePreview(orgId: number | null) {
+  return useQuery({
+    queryKey: ["organizations", "delete-preview", orgId],
+    queryFn: () => apiGet<OrganizationDeleteSummary>(`/api/organizations/${orgId}/delete-preview`),
+    enabled: orgId != null,
+    retry: false,
+  });
+}
+
 export function useDeleteOrganization() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => apiDelete(`/api/organizations/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["organizations"] }),
+    mutationFn: (id: number) => apiDelete<OrganizationDeleteResult>(`/api/organizations/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["organizations"] });
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
   });
 }

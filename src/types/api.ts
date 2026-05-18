@@ -33,6 +33,29 @@ export type OrganizationUpdate = {
   status?: string;
 };
 
+export type OrganizationDeleteSummary = {
+  organization_id: number;
+  name: string;
+  code: string;
+  user_count: number;
+  account_count: number;
+  ticket_count: number;
+  account_names: string[];
+};
+
+export type OrganizationDeleteResult = {
+  message: string;
+  accounts_deleted: number;
+  users_deleted: number;
+  tickets_deleted: number;
+};
+
+export type CorpusSummary = {
+  corpus_id: string;
+  name: string;
+  slug: string;
+};
+
 export type Account = {
   id: number;
   organization_id: number;
@@ -136,6 +159,7 @@ export type ChatSession = {
   session_status: string | null;
   started_at?: string | null;
   ended_at?: string | null;
+  message_count?: number | null;
 };
 
 export type ChatMessage = {

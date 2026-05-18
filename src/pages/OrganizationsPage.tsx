@@ -1,21 +1,24 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Building2, Plus, Trash2 } from "lucide-react";
 import {
   useCreateOrganization,
   useDeleteOrganization,
+  useOrganizationDeletePreview,
   useOrganizations,
   useUpdateOrganization,
 } from "@/hooks/useOrganizations";
+import { useAccounts } from "@/hooks/useAccounts";
+import { useUsers } from "@/hooks/useUsers";
+import { OrganizationDeleteDialog } from "@/components/organizations/OrganizationDeleteDialog";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { Organization } from "@/types/api";
+import type { Organization, OrganizationDeleteSummary } from "@/types/api";
 
 export function OrganizationsPage() {
   const { data = [], isLoading } = useOrganizations();
@@ -25,12 +28,39 @@ export function OrganizationsPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Organization | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Organization | null>(null);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [status, setStatus] = useState("ACTIVE");
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+
+  const deleteOrgId = deleteTarget?.id ?? null;
+  const {
+    data: deleteSummary,
+    isLoading: loadingDeletePreview,
+    isError: deletePreviewFailed,
+  } = useOrganizationDeletePreview(deleteOrgId);
+  const { data: orgUsers = [], isLoading: loadingOrgUsers } = useUsers(deleteOrgId);
+  const { data: orgAccounts = [], isLoading: loadingOrgAccounts } = useAccounts(deleteOrgId);
+
+  const effectiveDeleteSummary = useMemo((): OrganizationDeleteSummary | null => {
+    if (!deleteTarget) return null;
+    if (deleteSummary) return deleteSummary;
+    return {
+      organization_id: deleteTarget.id,
+      name: deleteTarget.name,
+      code: deleteTarget.code,
+      user_count: orgUsers.length,
+      account_count: orgAccounts.length,
+      ticket_count: 0,
+      account_names: orgAccounts.map((a) => a.name),
+    };
+  }, [deleteTarget, deleteSummary, orgUsers, orgAccounts]);
+
+  const loadingDeleteSummary =
+    !!deleteTarget && (loadingDeletePreview || loadingOrgUsers || loadingOrgAccounts);
 
   function openCreate() {
     setEditing(null);
@@ -50,6 +80,18 @@ export function OrganizationsPage() {
     setDialogOpen(true);
   }
 
+  function openDelete(org: Organization) {
+    setDeleteTarget(org);
+    setDeleteError(null);
+  }
+
+  function closeDelete() {
+    if (!deleteOrg.isPending) {
+      setDeleteTarget(null);
+      setDeleteError(null);
+    }
+  }
+
   async function handleSave() {
     setError(null);
     try {
@@ -64,6 +106,20 @@ export function OrganizationsPage() {
     }
   }
 
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setDeleteError(null);
+    try {
+      const result = await deleteOrg.mutateAsync(deleteTarget.id);
+      setDeleteSuccess(result.message);
+      setDeleteTarget(null);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const summaryError = deletePreviewFailed && !deleteSummary ? "preview_unavailable" : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -76,6 +132,12 @@ export function OrganizationsPage() {
           </Button>
         }
       />
+
+      {deleteSuccess && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {deleteSuccess}
+        </div>
+      )}
 
       <DataTable<Organization>
         columns={[
@@ -91,7 +153,7 @@ export function OrganizationsPage() {
                 <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>
                   Edit
                 </Button>
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteId(r.id); }}>
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openDelete(r); }}>
                   <Trash2 className="h-4 w-4 text-red-500" />
                 </Button>
               </div>
@@ -138,27 +200,17 @@ export function OrganizationsPage() {
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog
-        open={deleteId != null}
-        title="Delete organization"
-        message="Remove all users, accounts, and tickets in this organization before deleting it."
-        destructive
-        loading={deleteOrg.isPending}
-        onCancel={() => { setDeleteId(null); setDeleteError(null); }}
-        onConfirm={async () => {
-          if (deleteId) {
-            setDeleteError(null);
-            try {
-              await deleteOrg.mutateAsync(deleteId);
-              setDeleteId(null);
-            } catch (e) {
-              setDeleteError(e instanceof Error ? e.message : String(e));
-              setDeleteId(null);
-            }
-          }
-        }}
+      <OrganizationDeleteDialog
+        open={deleteTarget != null}
+        organization={deleteTarget}
+        summary={effectiveDeleteSummary}
+        loadingSummary={loadingDeleteSummary}
+        summaryError={summaryError}
+        deleting={deleteOrg.isPending}
+        deleteError={deleteError}
+        onCancel={closeDelete}
+        onConfirm={handleConfirmDelete}
       />
-      {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
     </div>
   );
 }

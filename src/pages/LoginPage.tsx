@@ -2,21 +2,27 @@ import { type FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Eye, EyeOff, Lock, User } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAccessToken } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function LoginPage() {
-  const { login, loginWithZoho } = useAuth();
+  const { login, loginWithZoho, user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [ready, setReady] = useState(false);
 
-  if (getAccessToken() || ready) return <Navigate to="/" replace />;
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        Loading...
+      </div>
+    );
+  }
+
+  if (user) return <Navigate to="/" replace />;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -24,7 +30,6 @@ export function LoginPage() {
     setError(null);
     try {
       await login(email.trim(), password);
-      setReady(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

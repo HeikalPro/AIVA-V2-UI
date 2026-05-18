@@ -15,6 +15,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { CorpusSelect } from "@/components/shared/CorpusSelect";
+import { useCorpora } from "@/hooks/useCorpora";
+import { resolveCorpusDisplayName } from "@/lib/corpus";
 import type { Account, User } from "@/types/api";
 
 export function AccountsPage() {
@@ -22,6 +25,7 @@ export function AccountsPage() {
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: llmConfigs = [] } = useLLMConfigs(isSuperAdmin);
+  const { data: corpora = [] } = useCorpora();
   const { data = [], isLoading } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const createAccount = useCreateAccount();
   const updateAccount = useUpdateAccount();
@@ -144,7 +148,11 @@ export function AccountsPage() {
           { key: "id", header: "ID", sortable: true },
           { key: "name", header: "Name", sortable: true },
           { key: "organization_id", header: "Org ID", sortable: true },
-          { key: "corpus_id", header: "Corpus", render: (r) => r.corpus_id ?? "—" },
+          {
+            key: "corpus_id",
+            header: "Knowledge base",
+            render: (r) => resolveCorpusDisplayName(r.corpus_id, corpora),
+          },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
           {
             key: "actions",
@@ -184,7 +192,10 @@ export function AccountsPage() {
             )}
             <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1" /></div>
             <div><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-1" /></div>
-            <div><Label>Corpus ID</Label><Input value={form.corpus_id} onChange={(e) => setForm({ ...form, corpus_id: e.target.value })} className="mt-1" /></div>
+            <CorpusSelect
+              value={form.corpus_id}
+              onChange={(corpusId) => setForm({ ...form, corpus_id: corpusId })}
+            />
             <div>
               <Label>LLM Config</Label>
               <Select value={form.llm_config_id} onChange={(e) => setForm({ ...form, llm_config_id: e.target.value })} className="mt-1">

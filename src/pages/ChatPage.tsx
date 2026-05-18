@@ -1,21 +1,47 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MessageSquare, Send } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useCreateSession, useSessionMessages, sendMessageStream } from "@/hooks/useChat";
+import {
+  useChatSessions,
+  useCreateSession,
+  useSessionMessages,
+  sendMessageStream,
+} from "@/hooks/useChat";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import type { ChatMessage } from "@/types/api";
 
 type Msg = { role: string; text: string };
 
+function sessionStorageKey(accountId: number) {
+  return `aiva_chat_session_${accountId}`;
+}
+
+function messagesToUi(rows: ChatMessage[]): Msg[] {
+  return rows.map((m) => ({ role: m.sender_type, text: m.message_text }));
+}
+
+function formatSessionLabel(id: number, startedAt?: string | null, count?: number | null) {
+  const date = startedAt ? new Date(startedAt).toLocaleString() : "";
+  const msgs = count != null ? `${count} message${count === 1 ? "" : "s"}` : "";
+  return [date, msgs].filter(Boolean).join(" · ") || `Session #${id}`;
+}
+
 export function ChatPage() {
   const { user } = useAuth();
+  const qc = useQueryClient();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
+  const {
+    data: accounts = [],
+    isError: accountsError,
+    error: accountsLoadError,
+  } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const createSession = useCreateSession();
 
   const [accountId, setAccountId] = useState<number | null>(null);
@@ -24,10 +50,58 @@ export function ChatPage() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { refetch: refetchMessages } = useSessionMessages(sessionId);
+  const { data: sessions = [], isLoading: sessionsLoading } = useChatSessions(selectedAccountId);
+  const {
+    data: storedMessages,
+    refetch: refetchMessages,
+    isFetching: fetchingMessages,
+  } = useSessionMessages(sessionId);
+
+  const applyMessages = useCallback((rows: ChatMessage[] | undefined) => {
+    setMessages(rows?.length ? messagesToUi(rows) : []);
+  }, []);
+
+  useEffect(() => {
+    applyMessages(storedMessages);
+  }, [storedMessages, applyMessages]);
+
+  useEffect(() => {
+    if (!selectedAccountId || sessionsLoading || sessions.length === 0) return;
+    const key = sessionStorageKey(selectedAccountId);
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const id = Number(saved);
+      if (sessions.some((s) => s.id === id)) {
+        setSessionId(id);
+        return;
+      }
+    }
+    setSessionId(sessions[0].id);
+  }, [selectedAccountId, sessions, sessionsLoading]);
+
+  useEffect(() => {
+    if (sessionId && selectedAccountId) {
+      localStorage.setItem(sessionStorageKey(selectedAccountId), String(sessionId));
+    }
+  }, [sessionId, selectedAccountId]);
+
+  async function loadHistory() {
+    if (!sessionId) return;
+    setError(null);
+    setLoadingHistory(true);
+    try {
+      const result = await refetchMessages();
+      applyMessages(result.data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
 
   async function startSession() {
     if (!selectedAccountId) return;
@@ -37,22 +111,22 @@ export function ChatPage() {
       setSessionId(session.id);
       setMessages([]);
       setLatency(null);
+      localStorage.setItem(sessionStorageKey(selectedAccountId), String(session.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  async function loadHistory() {
-    if (!sessionId) return;
-    setError(null);
-    try {
-      const result = await refetchMessages();
-      setMessages(
-        (result.data ?? []).map((m) => ({ role: m.sender_type, text: m.message_text })),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+  function onAccountChange(nextAccountId: number) {
+    setAccountId(nextAccountId);
+    setSessionId(null);
+    setMessages([]);
+    setLatency(null);
+  }
+
+  function onSessionChange(nextSessionId: number) {
+    setSessionId(nextSessionId);
+    setLatency(null);
   }
 
   async function send() {
@@ -77,12 +151,16 @@ export function ChatPage() {
         }
         if (ev.type === "done" && ev.latency_ms !== undefined) setLatency(ev.latency_ms);
       });
+      await qc.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
+      await qc.invalidateQueries({ queryKey: ["chat-sessions", selectedAccountId] });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setStreaming(false);
     }
   }
+
+  const historyBusy = loadingHistory || fetchingMessages;
 
   return (
     <div className="space-y-6">
@@ -91,31 +169,88 @@ export function ChatPage() {
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-[200px]">
           <Label>Account</Label>
-          <Select value={selectedAccountId ?? ""} onChange={(e) => { setAccountId(Number(e.target.value)); setSessionId(null); setMessages([]); }} className="mt-1">
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          <Select
+            value={selectedAccountId ?? ""}
+            onChange={(e) => onAccountChange(Number(e.target.value))}
+            className="mt-1"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
           </Select>
         </div>
+
+        <div className="min-w-[220px]">
+          <Label>Session</Label>
+          <Select
+            value={sessionId ?? ""}
+            onChange={(e) => onSessionChange(Number(e.target.value))}
+            className="mt-1"
+            disabled={!selectedAccountId || sessionsLoading || sessions.length === 0}
+          >
+            {sessions.length === 0 ? (
+              <option value="">No sessions yet</option>
+            ) : (
+              sessions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  #{s.id} — {formatSessionLabel(s.id, s.started_at, s.message_count)}
+                </option>
+              ))
+            )}
+          </Select>
+        </div>
+
         <Button onClick={startSession} disabled={!selectedAccountId || createSession.isPending}>
           New Session
         </Button>
-        <Button variant="outline" onClick={loadHistory} disabled={!sessionId}>
-          Load History
+        <Button
+          variant="outline"
+          onClick={loadHistory}
+          disabled={!sessionId || historyBusy}
+        >
+          {historyBusy ? "Loading…" : "Load History"}
         </Button>
-        {sessionId && <span className="text-sm text-muted-foreground">Session #{sessionId}</span>}
       </div>
 
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {accountsError && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {accountsLoadError instanceof Error ? accountsLoadError.message : "Failed to load accounts"}
+        </div>
+      )}
+      {!accountsError && accounts.length === 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          No account assigned. Ask an admin to assign you to an account in Users.
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
 
       <div className="max-w-3xl space-y-3">
+        {historyBusy && messages.length === 0 && (
+          <p className="text-sm text-muted-foreground">Loading conversation…</p>
+        )}
+        {!historyBusy && sessionId && messages.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No messages in this session yet. Send a message or pick another session.
+          </p>
+        )}
         {messages.map((m, i) => (
           <div
             key={i}
             className={`rounded-xl border px-4 py-3 ${
-              m.role === "AI" ? "border-l-4 border-l-[#004080] bg-white" : "border-l-4 border-l-emerald-500 bg-white"
+              m.role === "AI"
+                ? "border-l-4 border-l-[#004080] bg-white"
+                : "border-l-4 border-l-emerald-500 bg-white"
             }`}
           >
             <p className="mb-1 text-xs font-semibold uppercase text-slate-500">{m.role}</p>
-            <p className="whitespace-pre-wrap text-sm text-slate-800">{m.text || (streaming && i === messages.length - 1 ? "..." : "")}</p>
+            <p className="whitespace-pre-wrap text-sm text-slate-800">
+              {m.text || (streaming && i === messages.length - 1 ? "..." : "")}
+            </p>
           </div>
         ))}
       </div>

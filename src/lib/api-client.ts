@@ -118,8 +118,11 @@ export function apiDelete<T>(path: string, auth = true) {
   return request<T>("DELETE", path, undefined, { auth });
 }
 
+const backendUrl = () => import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+
 export function startZohoLogin() {
-  window.location.href = `${baseUrl()}/api/auth/zoho/login?redirect=true`;
+  const returnTo = encodeURIComponent(`${window.location.origin}/auth/zoho-callback`);
+  window.location.href = `${backendUrl()}/api/auth/zoho/login?redirect=true&return_to=${returnTo}`;
 }
 
 export async function apiStream(

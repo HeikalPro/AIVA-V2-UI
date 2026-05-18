@@ -1,11 +1,23 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiStream } from "@/lib/api-client";
 import type { ChatMessage, ChatSession } from "@/types/api";
 
+export function useChatSessions(accountId: number | null) {
+  return useQuery({
+    queryKey: ["chat-sessions", accountId],
+    queryFn: () => apiGet<ChatSession[]>(`/api/chat/sessions?account_id=${accountId}`),
+    enabled: accountId != null,
+  });
+}
+
 export function useCreateSession() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (accountId: number) =>
       apiPost<ChatSession>("/api/chat/sessions", { account_id: accountId }),
+    onSuccess: (_data, accountId) => {
+      qc.invalidateQueries({ queryKey: ["chat-sessions", accountId] });
+    },
   });
 }
 

@@ -36,6 +36,10 @@ const ROLE_OPTIONS = [
 export function UsersPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
+  const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN);
+  const isAccountManager = user?.roles.includes(ROLES.ACCOUNT_MANAGER);
+  const canCreateUsers = isSuperAdmin || isOrgAdmin;
+  const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const { data = [], isLoading } = useUsers(isSuperAdmin ? null : user?.organization_id);
@@ -74,10 +78,16 @@ export function UsersPage() {
   const accountNameById = new Map(accounts.map((a) => [a.id, a.name]));
   const availableAccounts = editAccounts.filter((a) => !(editing?.account_ids ?? []).includes(a.id));
 
+  function defaultCreateOrganizationId(): string {
+    if (!isSuperAdmin) return String(user?.organization_id ?? "");
+    const orgWithAccounts = orgs.find((o) => accounts.some((a) => a.organization_id === o.id));
+    return String(orgWithAccounts?.id ?? orgs[0]?.id ?? "");
+  }
+
   function openCreate() {
     setEditing(null);
     setForm({
-      organization_id: String(user?.organization_id ?? orgs[0]?.id ?? ""),
+      organization_id: defaultCreateOrganizationId(),
       email: "",
       password: "",
       first_name: "",
@@ -172,7 +182,13 @@ export function UsersPage() {
         icon={Users}
         title="Users"
         description="Manage platform users and roles"
-        actions={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" /> New User</Button>}
+        actions={
+          canCreateUsers ? (
+            <Button onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" /> New User
+            </Button>
+          ) : undefined
+        }
       />
 
       <DataTable<User>
@@ -193,8 +209,7 @@ export function UsersPage() {
               </div>
             ),
           },
-          ...(isSuperAdmin
-            ? [{
+          {
                 key: "accounts",
                 header: "Accounts",
                 render: (r: User) => (
@@ -206,8 +221,7 @@ export function UsersPage() {
                       : "—"}
                   </div>
                 ),
-              }]
-            : []),
+          },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
           {
             key: "actions",
@@ -238,6 +252,11 @@ export function UsersPage() {
                 <Select value={form.organization_id} onChange={(e) => setForm({ ...form, organization_id: e.target.value, account_id: "" })} className="mt-1">
                   {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </Select>
+                {createOrgId && createAccounts.length === 0 && (
+                  <p className="mt-1 text-sm text-amber-700">
+                    No accounts in this organization. Create an account first, or pick another organization (e.g. GoChat247 for Hallan).
+                  </p>
+                )}
               </div>
             )}
             <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>
@@ -266,7 +285,7 @@ export function UsersPage() {
                 </div>
               </>
             )}
-            {editing && isSuperAdmin && (
+            {editing && canAssignAccounts && (
               <div className="space-y-3 rounded-md border p-3">
                 <Label>Account Access</Label>
                 <div className="space-y-2">
