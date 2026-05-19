@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { ChatMessage } from "@/types/api";
+import type { ChatMessage, ChatSession } from "@/types/api";
 
 type Msg = { role: string; text: string };
 
@@ -27,10 +27,21 @@ function messagesToUi(rows: ChatMessage[]): Msg[] {
   return rows.map((m) => ({ role: m.sender_type, text: m.message_text }));
 }
 
-function formatSessionLabel(id: number, startedAt?: string | null, count?: number | null) {
-  const date = startedAt ? new Date(startedAt).toLocaleString() : "";
-  const msgs = count != null ? `${count} message${count === 1 ? "" : "s"}` : "";
-  return [date, msgs].filter(Boolean).join(" · ") || `Session #${id}`;
+function formatAgentName(session: ChatSession): string {
+  const name = [session.agent_first_name, session.agent_last_name].filter(Boolean).join(" ").trim();
+  if (name) return name;
+  if (session.agent_email) return session.agent_email;
+  return `Agent #${session.user_id}`;
+}
+
+function formatSessionLabel(session: ChatSession) {
+  const agent = formatAgentName(session);
+  const date = session.started_at ? new Date(session.started_at).toLocaleString() : "";
+  const msgs =
+    session.message_count != null
+      ? `${session.message_count} message${session.message_count === 1 ? "" : "s"}`
+      : "";
+  return [agent, date, msgs].filter(Boolean).join(" · ");
 }
 
 export function ChatPage() {
@@ -195,7 +206,7 @@ export function ChatPage() {
             ) : (
               sessions.map((s) => (
                 <option key={s.id} value={s.id}>
-                  #{s.id} — {formatSessionLabel(s.id, s.started_at, s.message_count)}
+                  #{s.id} — {formatSessionLabel(s)}
                 </option>
               ))
             )}

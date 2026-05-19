@@ -162,6 +162,9 @@ export type ChatSession = {
   id: number;
   account_id: number;
   user_id: number;
+  agent_first_name?: string | null;
+  agent_last_name?: string | null;
+  agent_email?: string | null;
   session_status: string | null;
   started_at?: string | null;
   ended_at?: string | null;
