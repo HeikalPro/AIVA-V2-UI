@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Trash2, Users, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
@@ -14,6 +14,8 @@ import { useOrganizations } from "@/hooks/useOrganizations";
 import { useAccounts } from "@/hooks/useAccounts";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
+import { TableFilters } from "@/components/shared/TableFilters";
+import { filterRows } from "@/lib/table-filters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -64,6 +66,10 @@ export function UsersPage() {
     account_id: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [orgFilter, setOrgFilter] = useState("ALL");
+  const [roleFilter, setRoleFilter] = useState("ALL");
 
   const createOrgId = !editing && form.organization_id ? Number(form.organization_id) : null;
   const createAccounts = createOrgId
@@ -76,7 +82,16 @@ export function UsersPage() {
       ? accounts.filter((a) => a.organization_id === editOrgId)
       : accounts;
   const accountNameById = new Map(accounts.map((a) => [a.id, a.name]));
+  const orgNameById = useMemo(() => new Map(orgs.map((o) => [o.id, o.name])), [orgs]);
   const availableAccounts = editAccounts.filter((a) => !(editing?.account_ids ?? []).includes(a.id));
+
+  function resolveOrganizationName(u: User): string {
+    return (
+      u.organization_name
+      ?? orgNameById.get(u.organization_id)
+      ?? `Organization #${u.organization_id}`
+    );
+  }
 
   function defaultCreateOrganizationId(): string {
     if (!isSuperAdmin) return String(user?.organization_id ?? "");
@@ -144,6 +159,38 @@ export function UsersPage() {
     }
   }
 
+  const filteredData = useMemo(
+    () =>
+      filterRows(
+        data,
+        search,
+        (u) =>
+          [
+            u.email,
+            u.first_name ?? "",
+            u.last_name ?? "",
+            resolveOrganizationName(u),
+            u.organization_code ?? "",
+            u.status,
+            ...u.roles,
+            ...u.account_ids.map((id) => accountNameById.get(id) ?? ""),
+          ].join(" "),
+        [
+          (u) => statusFilter === "ALL" || u.status === statusFilter,
+          (u) => orgFilter === "ALL" || String(u.organization_id) === orgFilter,
+          (u) => roleFilter === "ALL" || u.roles.includes(roleFilter),
+        ],
+      ),
+    [data, search, statusFilter, orgFilter, roleFilter, accountNameById, orgNameById],
+  );
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+    setOrgFilter("ALL");
+    setRoleFilter("ALL");
+  }
+
   async function handleSave() {
     setError(null);
     try {
@@ -191,6 +238,52 @@ export function UsersPage() {
         }
       />
 
+      <TableFilters
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search by email, name, organization, role, or account…"
+        filters={[
+          ...(isSuperAdmin
+            ? [
+                {
+                  id: "user-org-filter",
+                  label: "Organization",
+                  value: orgFilter,
+                  onChange: setOrgFilter,
+                  options: [
+                    { value: "ALL", label: "All organizations" },
+                    ...orgs.map((o) => ({ value: String(o.id), label: o.name })),
+                  ],
+                },
+              ]
+            : []),
+          {
+            id: "user-role-filter",
+            label: "Role",
+            value: roleFilter,
+            onChange: setRoleFilter,
+            options: [
+              { value: "ALL", label: "All roles" },
+              ...ROLE_OPTIONS.map((r) => ({ value: r.name, label: r.name })),
+            ],
+          },
+          {
+            id: "user-status-filter",
+            label: "Status",
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: "ALL", label: "All statuses" },
+              { value: "ACTIVE", label: "Active" },
+              { value: "INACTIVE", label: "Inactive" },
+            ],
+          },
+        ]}
+        onClear={clearFilters}
+        totalCount={data.length}
+        filteredCount={filteredData.length}
+      />
+
       <DataTable<User>
         columns={[
           { key: "id", header: "ID", sortable: true },
@@ -199,6 +292,16 @@ export function UsersPage() {
             key: "name",
             header: "Name",
             render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "—",
+          },
+          {
+            key: "organization_id",
+            header: "Organization",
+            sortable: true,
+            render: (r) => (
+              <span title={r.organization_code ?? undefined}>
+                {resolveOrganizationName(r)}
+              </span>
+            ),
           },
           {
             key: "roles",
@@ -236,9 +339,10 @@ export function UsersPage() {
             ),
           },
         ]}
-        data={data}
+        data={filteredData}
         keyFn={(r) => r.id}
         loading={isLoading}
+        emptyMessage={data.length ? "No users match your search or filters" : "No users"}
         onRowClick={openEdit}
       />
 

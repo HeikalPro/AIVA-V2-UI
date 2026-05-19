@@ -12,7 +12,10 @@ import { useUsers } from "@/hooks/useUsers";
 import { OrganizationDeleteDialog } from "@/components/organizations/OrganizationDeleteDialog";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
+import { TableFilters } from "@/components/shared/TableFilters";
+import { filterRows } from "@/lib/table-filters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +38,8 @@ export function OrganizationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
 
   const deleteOrgId = deleteTarget?.id ?? null;
   const {
@@ -120,6 +125,22 @@ export function OrganizationsPage() {
 
   const summaryError = deletePreviewFailed && !deleteSummary ? "preview_unavailable" : null;
 
+  const filteredData = useMemo(
+    () =>
+      filterRows(
+        data,
+        search,
+        (o) => [o.name, o.code, o.status, ...(o.account_names ?? [])].join(" "),
+        [(o) => statusFilter === "ALL" || o.status === statusFilter],
+      ),
+    [data, search, statusFilter],
+  );
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -139,11 +160,50 @@ export function OrganizationsPage() {
         </div>
       )}
 
+      <TableFilters
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search by name, code, or account…"
+        filters={[
+          {
+            id: "org-status-filter",
+            label: "Status",
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: "ALL", label: "All statuses" },
+              { value: "ACTIVE", label: "Active" },
+              { value: "INACTIVE", label: "Inactive" },
+            ],
+          },
+        ]}
+        onClear={clearFilters}
+        totalCount={data.length}
+        filteredCount={filteredData.length}
+      />
+
       <DataTable<Organization>
         columns={[
           { key: "id", header: "ID", sortable: true },
           { key: "name", header: "Name", sortable: true },
           { key: "code", header: "Code", sortable: true },
+          {
+            key: "account_names",
+            header: "Accounts",
+            render: (r) => {
+              const names = r.account_names ?? [];
+              if (!names.length) {
+                return <span className="text-sm text-muted-foreground">No accounts</span>;
+              }
+              return (
+                <div className="flex max-w-md flex-wrap gap-1" title={names.join(", ")}>
+                  {names.map((name) => (
+                    <Badge key={name} variant="muted">{name}</Badge>
+                  ))}
+                </div>
+              );
+            },
+          },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
           {
             key: "actions",
@@ -160,9 +220,10 @@ export function OrganizationsPage() {
             ),
           },
         ]}
-        data={data}
+        data={filteredData}
         keyFn={(r) => r.id}
         loading={isLoading}
+        emptyMessage={data.length ? "No organizations match your search or filters" : "No organizations"}
         onRowClick={openEdit}
       />
 
@@ -189,6 +250,20 @@ export function OrganizationsPage() {
                 <option value="INACTIVE">INACTIVE</option>
               </Select>
             </div>
+            {editing && (
+              <div>
+                <Label>Accounts ({editing.account_count ?? editing.account_names?.length ?? 0})</Label>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(editing.account_names ?? []).length ? (
+                    editing.account_names!.map((accountName) => (
+                      <Badge key={accountName} variant="muted">{accountName}</Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No accounts in this organization</span>
+                  )}
+                </div>
+              </div>
+            )}
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
           <DialogFooter>

@@ -18,6 +18,8 @@ export type Organization = {
   name: string;
   code: string;
   status: string;
+  account_count?: number;
+  account_names?: string[];
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -59,6 +61,8 @@ export type CorpusSummary = {
 export type Account = {
   id: number;
   organization_id: number;
+  organization_name?: string | null;
+  organization_code?: string | null;
   llm_config_id: number | null;
   name: string;
   description: string | null;
@@ -87,6 +91,8 @@ export type AccountUpdate = {
 export type User = {
   id: number;
   organization_id: number;
+  organization_name?: string | null;
+  organization_code?: string | null;
   email: string;
   first_name: string | null;
   last_name: string | null;

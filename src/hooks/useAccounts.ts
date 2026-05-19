@@ -14,7 +14,10 @@ export function useCreateAccount() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: AccountCreate) => apiPost<Account>("/api/accounts", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["organizations"] });
+    },
   });
 }
 
@@ -23,7 +26,10 @@ export function useUpdateAccount() {
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: AccountUpdate }) =>
       apiPatch<Account>(`/api/accounts/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["organizations"] });
+    },
   });
 }
 
@@ -31,6 +37,9 @@ export function useDeleteAccount() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiDelete(`/api/accounts/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["organizations"] });
+    },
   });
 }

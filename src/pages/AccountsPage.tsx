@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Briefcase, Plus, Trash2, Users, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
@@ -8,6 +8,8 @@ import { useLLMConfigs } from "@/hooks/useLLMConfigs";
 import { useAccountUsers, useAssignAccount, useUnassignAccount, useUsers } from "@/hooks/useUsers";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
+import { TableFilters } from "@/components/shared/TableFilters";
+import { filterRows } from "@/lib/table-filters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -43,6 +45,9 @@ export function AccountsPage() {
   const [form, setForm] = useState({ organization_id: "", name: "", description: "", corpus_id: "", llm_config_id: "", status: "ACTIVE" });
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [orgFilter, setOrgFilter] = useState("ALL");
 
   const { data: accountMembers = [], isLoading: membersLoading } = useAccountUsers(
     membersAccount?.id ?? null,
@@ -53,6 +58,16 @@ export function AccountsPage() {
   const availableUsers = candidateUsers.filter(
     (u) => u.status === "ACTIVE" && !accountMembers.some((m) => m.id === u.id),
   );
+
+  const orgNameById = useMemo(() => new Map(orgs.map((o) => [o.id, o.name])), [orgs]);
+
+  function resolveOrganizationName(account: Account): string {
+    return (
+      account.organization_name
+      ?? orgNameById.get(account.organization_id)
+      ?? `Organization #${account.organization_id}`
+    );
+  }
 
   function openMembers(acc: Account) {
     setMembersAccount(acc);
@@ -113,6 +128,34 @@ export function AccountsPage() {
     setDialogOpen(true);
   }
 
+  const filteredData = useMemo(
+    () =>
+      filterRows(
+        data,
+        search,
+        (a) =>
+          [
+            a.name,
+            a.description ?? "",
+            resolveOrganizationName(a),
+            a.organization_code ?? "",
+            resolveCorpusDisplayName(a.corpus_id, corpora),
+            a.status,
+          ].join(" "),
+        [
+          (a) => statusFilter === "ALL" || a.status === statusFilter,
+          (a) => orgFilter === "ALL" || String(a.organization_id) === orgFilter,
+        ],
+      ),
+    [data, search, statusFilter, orgFilter, corpora, orgNameById],
+  );
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+    setOrgFilter("ALL");
+  }
+
   async function handleSave() {
     setError(null);
     try {
@@ -143,11 +186,56 @@ export function AccountsPage() {
         actions={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" /> New Account</Button>}
       />
 
+      <TableFilters
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search by name, organization, or knowledge base…"
+        filters={[
+          ...(isSuperAdmin
+            ? [
+                {
+                  id: "account-org-filter",
+                  label: "Organization",
+                  value: orgFilter,
+                  onChange: setOrgFilter,
+                  options: [
+                    { value: "ALL", label: "All organizations" },
+                    ...orgs.map((o) => ({ value: String(o.id), label: o.name })),
+                  ],
+                },
+              ]
+            : []),
+          {
+            id: "account-status-filter",
+            label: "Status",
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: "ALL", label: "All statuses" },
+              { value: "ACTIVE", label: "Active" },
+              { value: "INACTIVE", label: "Inactive" },
+            ],
+          },
+        ]}
+        onClear={clearFilters}
+        totalCount={data.length}
+        filteredCount={filteredData.length}
+      />
+
       <DataTable<Account>
         columns={[
           { key: "id", header: "ID", sortable: true },
           { key: "name", header: "Name", sortable: true },
-          { key: "organization_id", header: "Org ID", sortable: true },
+          {
+            key: "organization_id",
+            header: "Organization",
+            sortable: true,
+            render: (r) => (
+              <span title={r.organization_code ?? undefined}>
+                {resolveOrganizationName(r)}
+              </span>
+            ),
+          },
           {
             key: "corpus_id",
             header: "Knowledge base",
@@ -172,9 +260,10 @@ export function AccountsPage() {
             ),
           },
         ]}
-        data={data}
+        data={filteredData}
         keyFn={(r) => r.id}
         loading={isLoading}
+        emptyMessage={data.length ? "No accounts match your search or filters" : "No accounts"}
         onRowClick={openEdit}
       />
 
