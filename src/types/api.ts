@@ -196,12 +196,22 @@ export type Ticket = {
   created_at?: string | null;
 };
 
+export type DeveloperNotify = {
+  status: "disabled" | "no_recipients" | "sent" | "failed";
+  message: string;
+  recipients?: string[];
+};
+
 export type TicketCreate = {
   organization_id: number;
   account_id?: number | null;
   ticket_type: string;
   subject: string;
   description: string;
+};
+
+export type TicketCreateResponse = Ticket & {
+  developer_notify: DeveloperNotify;
 };
 
 export type TicketUpdate = {
@@ -234,6 +244,10 @@ export type IngestionRequestCreate = {
   request_type: string;
   description: string;
   requester_phone: string;
+};
+
+export type IngestionRequestCreateResponse = IngestionRequest & {
+  developer_notify: DeveloperNotify;
 };
 
 export type IngestionRequestUpdate = {

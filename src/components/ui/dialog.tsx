@@ -23,29 +23,44 @@ export function Dialog({ open, onOpenChange, children, size = "max-w-lg" }: Dial
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
-      <div className={`relative z-10 w-full ${size}`}>{children}</div>
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+          aria-hidden
+          onClick={() => onOpenChange(false)}
+        />
+        <div className={`relative z-10 my-auto w-full ${size}`}>{children}</div>
+      </div>
     </div>
   );
 }
 
 export function DialogContent({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ${className}`}>{children}</div>
+    <div
+      className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ${className}`}
+    >
+      {children}
+    </div>
   );
 }
 
-export function DialogHeader({ children }: { children: ReactNode }) {
-  return <div className="mb-4">{children}</div>;
+/** Scrollable middle section; use inside DialogContent with flex max-h layout. */
+export function DialogBody({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`overflow-y-auto ${className}`}>{children}</div>;
+}
+
+export function DialogHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`mb-4 shrink-0 ${className}`}>{children}</div>;
 }
 
 export function DialogTitle({ children }: { children: ReactNode }) {
   return <h2 className="text-xl font-bold text-[#00263E]">{children}</h2>;
 }
 
-export function DialogFooter({ children }: { children: ReactNode }) {
-  return <div className="mt-6 flex justify-end gap-2">{children}</div>;
+export function DialogFooter({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`mt-6 flex shrink-0 justify-end gap-2 ${className}`}>{children}</div>;
 }
 
 export function DialogClose({ onClose }: { onClose: () => void }) {

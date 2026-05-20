@@ -3,6 +3,7 @@ import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type {
   IngestionRequest,
   IngestionRequestCreate,
+  IngestionRequestCreateResponse,
   IngestionRequestUpdate,
   IngestionTrigger,
   JobOut,
@@ -35,7 +36,7 @@ export function useCreateIngestionRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: IngestionRequestCreate) =>
-      apiPost<IngestionRequest>("/api/ingestion/requests", body),
+      apiPost<IngestionRequestCreateResponse>("/api/ingestion/requests", body),
     onSuccess: () => invalidateIngestionQueries(qc),
   });
 }

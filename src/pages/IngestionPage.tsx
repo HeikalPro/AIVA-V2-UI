@@ -15,12 +15,12 @@ import { DataTable } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { filterRows } from "@/lib/table-filters";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { IngestionRequest } from "@/types/api";
+import type { DeveloperNotify, IngestionRequest } from "@/types/api";
 
 const INGESTION_STATUS_OPTIONS = [
   "PENDING",
@@ -77,6 +77,7 @@ export function IngestionPage() {
     requester_phone: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [emailNotify, setEmailNotify] = useState<DeveloperNotify | null>(null);
 
   const organizationNameById = useMemo(
     () => new Map(organizations.map((o) => [o.id, o.name])),
@@ -116,6 +117,7 @@ export function IngestionPage() {
       requester_phone: "",
     });
     setError(null);
+    setEmailNotify(null);
     setDialogOpen(true);
   }
 
@@ -164,13 +166,13 @@ export function IngestionPage() {
       return;
     }
     try {
-      await createRequest.mutateAsync({
+      const created = await createRequest.mutateAsync({
         account_id: Number(form.account_id),
         request_type: form.request_type,
         description: form.description.trim(),
         requester_phone: form.requester_phone.trim(),
       });
-      setDialogOpen(false);
+      setEmailNotify(created.developer_notify);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -412,12 +414,13 @@ export function IngestionPage() {
 
       {canManageIngestion && (
         <Dialog open={viewOpen} onOpenChange={setViewOpen} size="max-w-2xl">
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
+          <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col overflow-hidden p-0">
+            <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
               <DialogTitle>
                 Ingestion request #{viewing?.id ?? ""}
               </DialogTitle>
             </DialogHeader>
+            <DialogBody className="min-h-0 flex-1 px-6 py-4">
             {viewing && (
               <div className="space-y-4 text-sm">
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -486,7 +489,8 @@ export function IngestionPage() {
                 {viewError && <p className="text-sm text-red-600">{viewError}</p>}
               </div>
             )}
-            <DialogFooter>
+            </DialogBody>
+            <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
               <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
               <Button
                 onClick={handleSaveStatus}
@@ -501,8 +505,11 @@ export function IngestionPage() {
 
       {canCreateRequest && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="max-w-2xl">
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>New Ingestion Request</DialogTitle></DialogHeader>
+          <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col overflow-hidden p-0">
+            <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
+              <DialogTitle>New Ingestion Request</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="min-h-0 flex-1 px-6 py-4">
             <div className="space-y-4">
               <div>
                 <Label>Account</Label>
@@ -568,17 +575,52 @@ export function IngestionPage() {
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   placeholder={KB_DESCRIPTION_PLACEHOLDER}
-                  rows={5}
+                  rows={3}
                   className="mt-2 w-full rounded-md border border-input px-3 py-2 text-sm"
                 />
               </div>
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {emailNotify && (
+                <div
+                  className={
+                    emailNotify.status === "sent"
+                      ? "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
+                      : emailNotify.status === "disabled" || emailNotify.status === "no_recipients"
+                        ? "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                  }
+                  role="status"
+                >
+                  <p className="font-medium">
+                    {emailNotify.status === "sent"
+                      ? "Developer email sent"
+                      : emailNotify.status === "failed"
+                        ? "Developer email not sent"
+                        : "Developer email skipped"}
+                  </p>
+                  <p className="mt-1">{emailNotify.message}</p>
+                </div>
+              )}
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={createRequest.isPending}>
-                Create
-              </Button>
+            </DialogBody>
+            <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
+              {emailNotify ? (
+                <Button
+                  onClick={() => {
+                    setEmailNotify(null);
+                    setDialogOpen(false);
+                  }}
+                >
+                  Close
+                </Button>
+              ) : (
+                <>
+                  <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                  <Button onClick={handleCreate} disabled={createRequest.isPending}>
+                    {createRequest.isPending ? "Creating…" : "Create"}
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -11,12 +11,12 @@ import { TableFilters } from "@/components/shared/TableFilters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { filterRows } from "@/lib/table-filters";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { Ticket } from "@/types/api";
+import type { DeveloperNotify, Ticket } from "@/types/api";
 
 export function TicketsPage() {
   const { user } = useAuth();
@@ -53,6 +53,7 @@ export function TicketsPage() {
     assigned_to: "",
   });
   const [error, setError] = useState<string | null>(null);
+  const [emailNotify, setEmailNotify] = useState<DeveloperNotify | null>(null);
 
   const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
   const organizationNameById = useMemo(
@@ -93,6 +94,7 @@ export function TicketsPage() {
     setEditing(null);
     setForm({ account_id: "", ticket_type: "SUPPORT", status: "OPEN", subject: "", description: "", assigned_to: "" });
     setError(null);
+    setEmailNotify(null);
     setDialogOpen(true);
   }
 
@@ -107,6 +109,7 @@ export function TicketsPage() {
       assigned_to: t.assigned_to != null ? String(t.assigned_to) : "",
     });
     setError(null);
+    setEmailNotify(null);
     setDialogOpen(true);
   }
 
@@ -125,13 +128,15 @@ export function TicketsPage() {
           },
         });
       } else {
-        await createTicket.mutateAsync({
+        const created = await createTicket.mutateAsync({
           organization_id: user!.organization_id,
           account_id: form.account_id ? Number(form.account_id) : null,
           ticket_type: form.ticket_type,
           subject: form.subject,
           description: form.description,
         });
+        setEmailNotify(created.developer_notify);
+        return;
       }
       setDialogOpen(false);
     } catch (e) {
@@ -265,8 +270,11 @@ export function TicketsPage() {
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>{editing ? "Edit Ticket" : "New Ticket"}</DialogTitle></DialogHeader>
+        <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-lg flex-col overflow-hidden p-0">
+          <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
+            <DialogTitle>{editing ? "Edit Ticket" : "New Ticket"}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="min-h-0 flex-1 px-6 py-4">
           <div className="space-y-4">
             {!editing && (
               <div>
@@ -306,10 +314,47 @@ export function TicketsPage() {
               </div>
             )}
             {error && <p className="text-sm text-red-600">{error}</p>}
+            {emailNotify && (
+              <div
+                className={
+                  emailNotify.status === "sent"
+                    ? "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
+                    : emailNotify.status === "disabled" || emailNotify.status === "no_recipients"
+                      ? "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                      : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                }
+                role="status"
+              >
+                <p className="font-medium">
+                  {emailNotify.status === "sent"
+                    ? "Developer email sent"
+                    : emailNotify.status === "failed"
+                      ? "Developer email not sent"
+                      : "Developer email skipped"}
+                </p>
+                <p className="mt-1">{emailNotify.message}</p>
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? "Save" : "Create"}</Button>
+          </DialogBody>
+          <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
+            {emailNotify ? (
+              <Button
+                onClick={() => {
+                  setEmailNotify(null);
+                  setDialogOpen(false);
+                }}
+              >
+                Close
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleSave} disabled={createTicket.isPending || updateTicket.isPending}>
+                  {editing ? "Save" : createTicket.isPending ? "Creating…" : "Create"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

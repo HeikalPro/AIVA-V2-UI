@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { Ticket, TicketCreate, TicketUpdate } from "@/types/api";
+import type { Ticket, TicketCreate, TicketCreateResponse, TicketUpdate } from "@/types/api";
 
 export type TicketFilters = {
   organization_id?: number;
@@ -39,7 +39,7 @@ function invalidateTicketsQueries(qc: QueryClient) {
 export function useCreateTicket() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: TicketCreate) => apiPost<Ticket>("/api/tickets", body),
+    mutationFn: (body: TicketCreate) => apiPost<TicketCreateResponse>("/api/tickets", body),
     onSuccess: () => invalidateTicketsQueries(qc),
   });
 }
