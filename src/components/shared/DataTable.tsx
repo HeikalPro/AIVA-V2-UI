@@ -6,7 +6,10 @@ export type Column<T> = {
   key: string;
   header: string;
   render?: (row: T) => React.ReactNode;
+  /** Applied to both header and body cells unless overridden */
   className?: string;
+  headClassName?: string;
+  cellClassName?: string;
   sortable?: boolean;
   sortValue?: (row: T) => unknown;
 };
@@ -64,8 +67,8 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <Table>
+    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <Table className="min-w-full">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {columns.map((col) => {
@@ -78,7 +81,7 @@ export function DataTable<T>({
                 <ChevronsUpDown className="h-3.5 w-3.5 text-slate-300" />
               );
               return (
-                <TableHead key={col.key} className={col.className}>
+                <TableHead key={col.key} className={col.headClassName ?? col.className}>
                   {col.sortable ? (
                     <button
                       type="button"
@@ -115,11 +118,11 @@ export function DataTable<T>({
             sortedData.map((row) => (
               <TableRow
                 key={keyFn(row)}
-                className={onRowClick ? "cursor-pointer" : ""}
+                className={`group ${onRowClick ? "cursor-pointer" : ""}`}
                 onClick={() => onRowClick?.(row)}
               >
                 {columns.map((col) => (
-                  <TableCell key={col.key} className={col.className}>
+                  <TableCell key={col.key} className={col.cellClassName ?? col.className}>
                     {col.render ? col.render(row) : ((row as Record<string, unknown>)[col.key] as React.ReactNode)}
                   </TableCell>
                 ))}

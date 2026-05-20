@@ -9,6 +9,7 @@ import {
   useDeleteUser,
   useAssignAccount,
   useUnassignAccount,
+  useSetUserRole,
 } from "@/hooks/useUsers";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -35,6 +36,12 @@ const ROLE_OPTIONS = [
   { id: 6, name: "DEVELOPER" },
 ];
 
+function primaryRoleId(user: User): string {
+  const primaryName = user.roles[0];
+  const match = ROLE_OPTIONS.find((r) => r.name === primaryName);
+  return String(match?.id ?? "5");
+}
+
 export function UsersPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
@@ -50,6 +57,7 @@ export function UsersPage() {
   const deleteUser = useDeleteUser();
   const assignAccount = useAssignAccount();
   const unassignAccount = useUnassignAccount();
+  const setUserRole = useSetUserRole();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -125,7 +133,7 @@ export function UsersPage() {
       first_name: u.first_name ?? "",
       last_name: u.last_name ?? "",
       status: u.status,
-      role_id: "5",
+      role_id: primaryRoleId(u),
       account_id: "",
     });
     setError(null);
@@ -202,9 +210,14 @@ export function UsersPage() {
             first_name: form.first_name || null,
             last_name: form.last_name || null,
             status: form.status,
-            ...(form.password ? { password: form.password } : {}),
           },
         });
+        if (isSuperAdmin) {
+          await setUserRole.mutateAsync({
+            userId: editing.id,
+            body: { role_id: Number(form.role_id) },
+          });
+        }
       } else {
         await createUser.mutateAsync({
           organization_id: Number(form.organization_id),
@@ -364,30 +377,37 @@ export function UsersPage() {
               </div>
             )}
             <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>
-            <div>
-              <Label>{editing ? "New Password (optional)" : "Password"}</Label>
-              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="mt-1" />
-            </div>
+            {!editing && (
+              <div>
+                <Label>Password</Label>
+                <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="mt-1" />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div><Label>First Name</Label><Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} className="mt-1" /></div>
               <div><Label>Last Name</Label><Input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} className="mt-1" /></div>
             </div>
+            {(!editing || isSuperAdmin) && (
+              <div>
+                <Label>Role</Label>
+                <Select value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })} className="mt-1">
+                  {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </Select>
+                {editing && isSuperAdmin && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Replaces the user&apos;s current role. Account access below is unchanged.
+                  </p>
+                )}
+              </div>
+            )}
             {!editing && (
-              <>
-                <div>
-                  <Label>Role</Label>
-                  <Select value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })} className="mt-1">
-                    {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </Select>
-                </div>
-                <div>
-                  <Label>Account (optional)</Label>
-                  <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="mt-1">
-                    <option value="">None</option>
-                    {createAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </Select>
-                </div>
-              </>
+              <div>
+                <Label>Account (optional)</Label>
+                <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="mt-1">
+                  <option value="">None</option>
+                  {createAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </Select>
+              </div>
             )}
             {editing && canAssignAccounts && (
               <div className="space-y-3 rounded-md border p-3">
@@ -456,7 +476,12 @@ export function UsersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editing ? "Save" : "Create"}</Button>
+            <Button
+              onClick={handleSave}
+              disabled={createUser.isPending || updateUser.isPending || setUserRole.isPending}
+            >
+              {editing ? "Save" : "Create"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

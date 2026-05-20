@@ -15,7 +15,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { NAV_ITEMS, canAccess, displayRole } from "@/lib/roles";
+import { NAV_ITEMS, ROLES, canAccess, displayRole } from "@/lib/roles";
+import { useIngestionPendingCount } from "@/hooks/useIngestion";
+import { useTicketOpenCount } from "@/hooks/useTickets";
 import { Button } from "@/components/ui/button";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -37,6 +39,7 @@ function NavItem({
   isActive,
   collapsed,
   onNavigate,
+  badgeCount,
 }: {
   to: string;
   label: string;
@@ -44,6 +47,7 @@ function NavItem({
   isActive: boolean;
   collapsed: boolean;
   onNavigate?: () => void;
+  badgeCount?: number;
 }) {
   return (
     <NavLink
@@ -59,19 +63,38 @@ function NavItem({
         <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[#004080]" />
       )}
       <span
-        className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+        className={`relative flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
           isActive ? "bg-[#004080] text-white shadow-sm" : "text-slate-500 group-hover:bg-slate-100 group-hover:text-slate-700"
         }`}
       >
         <Icon className="h-[18px] w-[18px] shrink-0" />
+        {collapsed && badgeCount != null && badgeCount > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-0.5 text-[10px] font-semibold leading-none text-white">
+            {badgeCount > 9 ? "9+" : badgeCount}
+          </span>
+        )}
       </span>
-      {!collapsed && <span>{label}</span>}
+      {!collapsed && (
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <span>{label}</span>
+          {badgeCount != null && badgeCount > 0 && (
+            <span className="shrink-0 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white tabular-nums">
+              {badgeCount > 99 ? "99+" : badgeCount}
+            </span>
+          )}
+        </span>
+      )}
     </NavLink>
   );
 }
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
+  const { data: ticketOpenBadge } = useTicketOpenCount(isSuperAdmin);
+  const { data: ingestionPendingBadge } = useIngestionPendingCount(isSuperAdmin);
+  const openTicketCount = ticketOpenBadge?.open_count ?? 0;
+  const pendingIngestionCount = ingestionPendingBadge?.pending_count ?? 0;
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
@@ -127,6 +150,12 @@ export function Layout() {
           {navItems.map(({ path, label, icon }) => {
             const Icon = ICONS[icon] ?? LayoutDashboard;
             const active = path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+            const navBadge =
+              path === "/tickets" && isSuperAdmin
+                ? openTicketCount
+                : path === "/ingestion" && isSuperAdmin
+                  ? pendingIngestionCount
+                  : undefined;
             return (
               <NavItem
                 key={path}
@@ -135,6 +164,7 @@ export function Layout() {
                 icon={Icon}
                 isActive={active}
                 collapsed={!sidebarOpen}
+                badgeCount={navBadge}
                 onNavigate={() => isMobile && setSidebarOpen(false)}
               />
             );

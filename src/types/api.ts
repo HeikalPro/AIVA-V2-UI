@@ -119,6 +119,7 @@ export type UserUpdate = {
   first_name?: string | null;
   last_name?: string | null;
   status?: string;
+  role_id?: number;
 };
 
 export type UserRoleAssign = {
@@ -189,7 +190,6 @@ export type Ticket = {
   created_by: number;
   assigned_to: number | null;
   ticket_type: string | null;
-  priority: string | null;
   status: string | null;
   subject: string | null;
   description: string | null;
@@ -200,7 +200,6 @@ export type TicketCreate = {
   organization_id: number;
   account_id?: number | null;
   ticket_type: string;
-  priority?: string;
   subject: string;
   description: string;
 };
@@ -208,7 +207,6 @@ export type TicketCreate = {
 export type TicketUpdate = {
   assigned_to?: number | null;
   ticket_type?: string;
-  priority?: string;
   status?: string;
   subject?: string;
   description?: string;
@@ -217,7 +215,13 @@ export type TicketUpdate = {
 export type IngestionRequest = {
   id: number;
   account_id: number;
+  account_name?: string | null;
+  organization_id?: number | null;
+  organization_name?: string | null;
   requested_by: number;
+  requester_name?: string | null;
+  requester_email?: string | null;
+  requester_phone?: string | null;
   request_type: string | null;
   status: string | null;
   priority: string | null;
@@ -228,8 +232,12 @@ export type IngestionRequest = {
 export type IngestionRequestCreate = {
   account_id: number;
   request_type: string;
-  priority?: string;
   description: string;
+  requester_phone: string;
+};
+
+export type IngestionRequestUpdate = {
+  status: string;
 };
 
 export type IngestionTrigger = {
@@ -259,6 +267,9 @@ export type DashboardStats = {
 export type AgentMetric = {
   user_id: number;
   account_id: number;
+  agent_first_name?: string | null;
+  agent_last_name?: string | null;
+  agent_email?: string | null;
   avg_response_time: number | null;
   ai_usage_count: number | null;
   successful_answers: number | null;

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type { Ticket, TicketCreate, TicketUpdate } from "@/types/api";
 
@@ -20,11 +20,27 @@ export function useTickets(filters: TicketFilters = {}) {
   });
 }
 
+/** Super admin only: open / in-progress tickets for nav badge */
+export function useTicketOpenCount(enabled: boolean) {
+  return useQuery({
+    queryKey: ["tickets-open-count"],
+    queryFn: () => apiGet<{ open_count: number }>("/api/tickets/open-count"),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+}
+
+function invalidateTicketsQueries(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["tickets"] });
+  qc.invalidateQueries({ queryKey: ["tickets-open-count"] });
+}
+
 export function useCreateTicket() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: TicketCreate) => apiPost<Ticket>("/api/tickets", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+    onSuccess: () => invalidateTicketsQueries(qc),
   });
 }
 
@@ -33,7 +49,7 @@ export function useUpdateTicket() {
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: TicketUpdate }) =>
       apiPatch<Ticket>(`/api/tickets/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+    onSuccess: () => invalidateTicketsQueries(qc),
   });
 }
 
@@ -41,6 +57,6 @@ export function useDeleteTicket() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiDelete(`/api/tickets/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tickets"] }),
+    onSuccess: () => invalidateTicketsQueries(qc),
   });
 }

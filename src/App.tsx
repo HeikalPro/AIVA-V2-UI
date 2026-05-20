@@ -75,7 +75,7 @@ export function App() {
             <Route
               path="tickets"
               element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.AGENT, ROLES.DEVELOPER]}>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
                   <TicketsPage />
                 </ProtectedRoute>
               }
@@ -83,7 +83,7 @@ export function App() {
             <Route
               path="ingestion"
               element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.DEVELOPER]}>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
                   <IngestionPage />
                 </ProtectedRoute>
               }

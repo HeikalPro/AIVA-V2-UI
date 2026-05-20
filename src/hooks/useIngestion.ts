@@ -1,6 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api-client";
-import type { IngestionRequest, IngestionRequestCreate, IngestionTrigger, JobOut } from "@/types/api";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
+import type {
+  IngestionRequest,
+  IngestionRequestCreate,
+  IngestionRequestUpdate,
+  IngestionTrigger,
+  JobOut,
+} from "@/types/api";
+
+function invalidateIngestionQueries(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["ingestion-requests"] });
+  qc.invalidateQueries({ queryKey: ["ingestion-pending-count"] });
+}
 
 export function useIngestionRequests() {
   return useQuery({
@@ -9,12 +20,32 @@ export function useIngestionRequests() {
   });
 }
 
+/** Super admin only: pending ingestion requests for nav badge */
+export function useIngestionPendingCount(enabled: boolean) {
+  return useQuery({
+    queryKey: ["ingestion-pending-count"],
+    queryFn: () => apiGet<{ pending_count: number }>("/api/ingestion/requests/pending-count"),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+}
+
 export function useCreateIngestionRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: IngestionRequestCreate) =>
       apiPost<IngestionRequest>("/api/ingestion/requests", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ingestion-requests"] }),
+    onSuccess: () => invalidateIngestionQueries(qc),
+  });
+}
+
+export function useUpdateIngestionRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: IngestionRequestUpdate }) =>
+      apiPatch<IngestionRequest>(`/api/ingestion/requests/${id}`, body),
+    onSuccess: () => invalidateIngestionQueries(qc),
   });
 }
 

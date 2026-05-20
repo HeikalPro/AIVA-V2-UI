@@ -6,9 +6,11 @@ type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  /** Max width of the dialog panel (Tailwind class, e.g. max-w-2xl). Defaults to max-w-lg. */
+  size?: string;
 };
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, size = "max-w-lg" }: DialogProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -23,7 +25,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
-      <div className="relative z-10 w-full max-w-lg">{children}</div>
+      <div className={`relative z-10 w-full ${size}`}>{children}</div>
     </div>
   );
 }

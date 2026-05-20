@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api-client";
 import type { AccountUserAssign, User, UserCreate, UserRoleAssign, UserUpdate } from "@/types/api";
 
 export function useUsers(organizationId?: number | null) {
@@ -22,6 +22,15 @@ export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: UserUpdate }) => apiPatch<User>(`/api/users/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+export function useSetUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, body }: { userId: number; body: UserRoleAssign }) =>
+      apiPut<User>(`/api/users/${userId}/role`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
 }

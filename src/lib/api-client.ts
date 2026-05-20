@@ -114,6 +114,10 @@ export function apiPatch<T>(path: string, body?: unknown, auth = true) {
   return request<T>("PATCH", path, body, { auth });
 }
 
+export function apiPut<T>(path: string, body?: unknown, auth = true) {
+  return request<T>("PUT", path, body, { auth });
+}
+
 export function apiDelete<T>(path: string, auth = true) {
   return request<T>("DELETE", path, undefined, { auth });
 }

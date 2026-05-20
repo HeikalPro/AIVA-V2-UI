@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Ticket as TicketIcon, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useTickets, useCreateTicket, useUpdateTicket, useDeleteTicket } from "@/hooks/useTickets";
+import { useOrganizations } from "@/hooks/useOrganizations";
+import { useTickets, useTicketOpenCount, useCreateTicket, useUpdateTicket, useDeleteTicket } from "@/hooks/useTickets";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
+import { TableFilters } from "@/components/shared/TableFilters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { filterRows } from "@/lib/table-filters";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +21,16 @@ import type { Ticket } from "@/types/api";
 export function TicketsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
+  const canSubmitTickets =
+    !isSuperAdmin &&
+    !!user &&
+    (user.roles.includes(ROLES.ORG_ADMIN) ||
+      user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
+      user.roles.includes(ROLES.SUPERVISOR) ||
+      user.roles.includes(ROLES.DEVELOPER));
+  const { data: openBadge } = useTicketOpenCount(isSuperAdmin ?? false);
+  const openForSuperAdmin = openBadge?.open_count ?? 0;
+  const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const { data = [], isLoading } = useTickets({ organization_id: isSuperAdmin ? undefined : user?.organization_id });
   const createTicket = useCreateTicket();
@@ -27,10 +40,13 @@ export function TicketsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Ticket | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [typeFilter, setTypeFilter] = useState("ALL");
+  const [orgFilter, setOrgFilter] = useState("ALL");
   const [form, setForm] = useState({
     account_id: "",
     ticket_type: "SUPPORT",
-    priority: "MEDIUM",
     status: "OPEN",
     subject: "",
     description: "",
@@ -38,9 +54,44 @@ export function TicketsPage() {
   });
   const [error, setError] = useState<string | null>(null);
 
+  const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+  const organizationNameById = useMemo(
+    () => new Map(organizations.map((o) => [o.id, o.name])),
+    [organizations],
+  );
+  const ticketTypeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(data.map((t) => t.ticket_type).filter((v): v is string => !!v && v.trim().length > 0)),
+      ).sort((a, b) => a.localeCompare(b)),
+    [data],
+  );
+  const filteredData = useMemo(
+    () =>
+      filterRows(
+        data,
+        search,
+        (t) =>
+          [
+            t.subject ?? "",
+            t.description ?? "",
+            t.ticket_type ?? "",
+            t.status ?? "",
+            organizationNameById.get(t.organization_id) ?? "",
+            t.account_id != null ? accountNameById.get(t.account_id) ?? `Account #${t.account_id}` : "",
+          ].join(" "),
+        [
+          (t) => statusFilter === "ALL" || t.status === statusFilter,
+          (t) => typeFilter === "ALL" || t.ticket_type === typeFilter,
+          (t) => orgFilter === "ALL" || String(t.organization_id) === orgFilter,
+        ],
+      ),
+    [data, search, statusFilter, typeFilter, orgFilter, organizationNameById, accountNameById],
+  );
+
   function openCreate() {
     setEditing(null);
-    setForm({ account_id: "", ticket_type: "SUPPORT", priority: "MEDIUM", status: "OPEN", subject: "", description: "", assigned_to: "" });
+    setForm({ account_id: "", ticket_type: "SUPPORT", status: "OPEN", subject: "", description: "", assigned_to: "" });
     setError(null);
     setDialogOpen(true);
   }
@@ -50,7 +101,6 @@ export function TicketsPage() {
     setForm({
       account_id: t.account_id != null ? String(t.account_id) : "",
       ticket_type: t.ticket_type ?? "SUPPORT",
-      priority: t.priority ?? "MEDIUM",
       status: t.status ?? "OPEN",
       subject: t.subject ?? "",
       description: t.description ?? "",
@@ -68,7 +118,6 @@ export function TicketsPage() {
           id: editing.id,
           body: {
             ticket_type: form.ticket_type,
-            priority: form.priority,
             status: form.status,
             subject: form.subject,
             description: form.description,
@@ -80,7 +129,6 @@ export function TicketsPage() {
           organization_id: user!.organization_id,
           account_id: form.account_id ? Number(form.account_id) : null,
           ticket_type: form.ticket_type,
-          priority: form.priority,
           subject: form.subject,
           description: form.description,
         });
@@ -91,20 +139,107 @@ export function TicketsPage() {
     }
   }
 
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+    setTypeFilter("ALL");
+    setOrgFilter("ALL");
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         icon={TicketIcon}
         title="Tickets"
-        description="Support and escalation tickets"
-        actions={<Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" /> New Ticket</Button>}
+        description={
+          isSuperAdmin && openForSuperAdmin > 0
+            ? `${openForSuperAdmin} open or in-progress ticket${openForSuperAdmin === 1 ? "" : "s"} need your attention`
+            : "Tickets from organization admins, account managers, supervisors, and developers (super admins triage here)"
+        }
+        actions={
+          canSubmitTickets ? (
+            <Button onClick={openCreate}>
+              <Plus className="mr-2 h-4 w-4" /> New Ticket
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <TableFilters
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search by subject, type, status, account, or organization…"
+        filters={[
+          ...(isSuperAdmin
+            ? [
+                {
+                  id: "ticket-org-filter",
+                  label: "Organization",
+                  value: orgFilter,
+                  onChange: setOrgFilter,
+                  options: [
+                    { value: "ALL", label: "All organizations" },
+                    ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
+                  ],
+                },
+              ]
+            : []),
+          {
+            id: "ticket-status-filter",
+            label: "Status",
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: "ALL", label: "All statuses" },
+              { value: "OPEN", label: "Open" },
+              { value: "IN_PROGRESS", label: "In progress" },
+              { value: "RESOLVED", label: "Resolved" },
+              { value: "CLOSED", label: "Closed" },
+            ],
+          },
+          {
+            id: "ticket-type-filter",
+            label: "Type",
+            value: typeFilter,
+            onChange: setTypeFilter,
+            options: [
+              { value: "ALL", label: "All types" },
+              ...ticketTypeOptions.map((t) => ({ value: t, label: t })),
+            ],
+          },
+        ]}
+        onClear={clearFilters}
+        totalCount={data.length}
+        filteredCount={filteredData.length}
       />
 
       <DataTable<Ticket>
         columns={[
           { key: "id", header: "ID", sortable: true },
           { key: "subject", header: "Subject", sortable: true },
-          { key: "priority", header: "Priority", sortable: true },
+          ...(isSuperAdmin
+            ? [
+                {
+                  key: "organization_id",
+                  header: "Organization",
+                  render: (r: Ticket) => organizationNameById.get(r.organization_id) ?? `Org #${r.organization_id}`,
+                },
+                {
+                  key: "account_id",
+                  header: "Account",
+                  render: (r: Ticket) =>
+                    r.account_id != null
+                      ? accountNameById.get(r.account_id) ?? `Account #${r.account_id}`
+                      : "—",
+                },
+              ]
+            : []),
+          {
+            key: "created_at",
+            header: "Date",
+            sortable: true,
+            render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString() : "—"),
+          },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
           { key: "ticket_type", header: "Type", render: (r) => r.ticket_type ?? "—" },
           {
@@ -122,9 +257,10 @@ export function TicketsPage() {
             ),
           },
         ]}
-        data={data}
+        data={filteredData}
         keyFn={(r) => r.id}
         loading={isLoading}
+        emptyMessage={data.length ? "No tickets match your search or filters" : "No tickets"}
         onRowClick={openEdit}
       />
 
@@ -150,15 +286,6 @@ export function TicketsPage() {
               <div>
                 <Label>Type</Label>
                 <Input value={form.ticket_type} onChange={(e) => setForm({ ...form, ticket_type: e.target.value })} className="mt-1" />
-              </div>
-              <div>
-                <Label>Priority</Label>
-                <Select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="mt-1">
-                  <option value="LOW">LOW</option>
-                  <option value="MEDIUM">MEDIUM</option>
-                  <option value="HIGH">HIGH</option>
-                  <option value="URGENT">URGENT</option>
-                </Select>
               </div>
             </div>
             {editing && (
