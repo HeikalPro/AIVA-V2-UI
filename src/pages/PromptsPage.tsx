@@ -3,7 +3,7 @@ import { FileText, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
-import { usePrompts, useCreatePrompt, useUpdatePrompt, useDeletePrompt } from "@/hooks/usePrompts";
+import { usePrompts, useDefaultPrompt, useCreatePrompt, useUpdatePrompt, useDeletePrompt } from "@/hooks/usePrompts";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Prompt } from "@/types/api";
 
 export function PromptsPage() {
@@ -21,6 +22,7 @@ export function PromptsPage() {
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
+  const { data: defaultPrompt, isLoading: defaultLoading } = useDefaultPrompt();
   const { data = [], isLoading } = usePrompts(selectedAccountId);
   const createPrompt = useCreatePrompt();
   const updatePrompt = useUpdatePrompt();
@@ -67,7 +69,7 @@ export function PromptsPage() {
       <PageHeader
         icon={FileText}
         title="Prompts"
-        description="Manage AI prompts per account"
+        description="View the built-in system prompt and manage custom prompts per account"
         actions={<Button onClick={openCreate} disabled={!selectedAccountId}><Plus className="mr-2 h-4 w-4" /> New Prompt</Button>}
       />
 
@@ -78,7 +80,40 @@ export function PromptsPage() {
         </Select>
       </div>
 
-      <DataTable<Prompt>
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>{defaultPrompt?.prompt_name ?? "Default System Prompt"}</CardTitle>
+              <CardDescription className="mt-1.5">
+                Built-in prompt used when no custom prompt is active. The <code className="text-xs">{"{context}"}</code> placeholder is filled with knowledge base results at runtime.
+              </CardDescription>
+            </div>
+            <Badge variant="muted">Read-only</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Label>Type</Label>
+          <Input
+            value={defaultPrompt?.prompt_type ?? "system"}
+            readOnly
+            className="mt-1 max-w-xs bg-muted/40"
+          />
+          <div className="mt-4">
+            <Label>Prompt Text</Label>
+            <textarea
+              value={defaultLoading ? "Loading…" : (defaultPrompt?.prompt_text ?? "")}
+              readOnly
+              rows={8}
+              className="mt-1 w-full resize-none rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Custom Prompts</h2>
+        <DataTable<Prompt>
         columns={[
           { key: "id", header: "ID", sortable: true },
           { key: "prompt_name", header: "Name", sortable: true },
@@ -103,6 +138,7 @@ export function PromptsPage() {
         loading={isLoading}
         onRowClick={openEdit}
       />
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">

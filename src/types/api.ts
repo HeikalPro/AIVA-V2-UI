@@ -159,6 +159,13 @@ export type PromptUpdate = {
   is_active?: boolean;
 };
 
+export type DefaultPrompt = {
+  prompt_name: string;
+  prompt_type: string;
+  prompt_text: string;
+  read_only: boolean;
+};
+
 export type ChatSession = {
   id: number;
   account_id: number;
