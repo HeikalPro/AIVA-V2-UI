@@ -159,6 +159,15 @@ export type PromptUpdate = {
   is_active?: boolean;
 };
 
+export type SystemPrompt = {
+  prompt_text: string;
+  updated_at?: string | null;
+};
+
+export type SystemPromptUpdate = {
+  prompt_text: string;
+};
+
 export type ChatSession = {
   id: number;
   account_id: number;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { Prompt, PromptCreate, PromptUpdate } from "@/types/api";
+import type { Prompt, PromptCreate, PromptUpdate, SystemPrompt, SystemPromptUpdate } from "@/types/api";
 
 export function usePrompts(accountId?: number | null) {
   const params = accountId ? `?account_id=${accountId}` : "";
@@ -33,5 +33,20 @@ export function useDeletePrompt() {
   return useMutation({
     mutationFn: (id: number) => apiDelete(`/api/prompts/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["prompts"] }),
+  });
+}
+
+export function useSystemPrompt() {
+  return useQuery({
+    queryKey: ["prompts", "system"],
+    queryFn: () => apiGet<SystemPrompt>("/api/prompts/system"),
+  });
+}
+
+export function useUpdateSystemPrompt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SystemPromptUpdate) => apiPatch<SystemPrompt>("/api/prompts/system", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["prompts", "system"] }),
   });
 }

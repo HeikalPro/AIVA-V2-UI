@@ -1,9 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileText, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
-import { usePrompts, useCreatePrompt, useUpdatePrompt, useDeletePrompt } from "@/hooks/usePrompts";
+import {
+  usePrompts,
+  useCreatePrompt,
+  useUpdatePrompt,
+  useDeletePrompt,
+  useSystemPrompt,
+  useUpdateSystemPrompt,
+} from "@/hooks/usePrompts";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -13,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Prompt } from "@/types/api";
 
 export function PromptsPage() {
@@ -22,15 +30,26 @@ export function PromptsPage() {
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
   const { data = [], isLoading } = usePrompts(selectedAccountId);
+  const { data: systemPrompt, isLoading: systemPromptLoading } = useSystemPrompt();
   const createPrompt = useCreatePrompt();
   const updatePrompt = useUpdatePrompt();
   const deletePrompt = useDeletePrompt();
+  const updateSystemPrompt = useUpdateSystemPrompt();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Prompt | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [form, setForm] = useState({ prompt_name: "", prompt_type: "", prompt_text: "", is_active: true });
   const [error, setError] = useState<string | null>(null);
+  const [systemText, setSystemText] = useState("");
+  const [systemEditing, setSystemEditing] = useState(false);
+  const [systemError, setSystemError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (systemPrompt) {
+      setSystemText(systemPrompt.prompt_text);
+    }
+  }, [systemPrompt]);
 
   function openCreate() {
     if (!selectedAccountId) return;
@@ -62,6 +81,28 @@ export function PromptsPage() {
     }
   }
 
+  function startSystemEdit() {
+    setSystemText(systemPrompt?.prompt_text ?? "");
+    setSystemError(null);
+    setSystemEditing(true);
+  }
+
+  function cancelSystemEdit() {
+    setSystemText(systemPrompt?.prompt_text ?? "");
+    setSystemError(null);
+    setSystemEditing(false);
+  }
+
+  async function handleSystemSave() {
+    setSystemError(null);
+    try {
+      await updateSystemPrompt.mutateAsync({ prompt_text: systemText });
+      setSystemEditing(false);
+    } catch (e) {
+      setSystemError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -70,6 +111,47 @@ export function PromptsPage() {
         description="Manage AI prompts per account"
         actions={<Button onClick={openCreate} disabled={!selectedAccountId}><Plus className="mr-2 h-4 w-4" /> New Prompt</Button>}
       />
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle>Default System Template</CardTitle>
+            <CardDescription>
+              Used when an account has no active prompt. Include {"{context}"} where knowledge base content should appear.
+              {systemPrompt?.updated_at ? ` Last updated ${systemPrompt.updated_at}.` : ""}
+            </CardDescription>
+          </div>
+          {isSuperAdmin && !systemEditing && (
+            <Button variant="outline" size="sm" onClick={startSystemEdit} disabled={systemPromptLoading}>
+              Edit
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <textarea
+            value={systemText}
+            onChange={(e) => setSystemText(e.target.value)}
+            readOnly={!isSuperAdmin || !systemEditing}
+            rows={8}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-default disabled:opacity-100 read-only:bg-muted/30"
+            placeholder={systemPromptLoading ? "Loading default system template..." : undefined}
+          />
+          {isSuperAdmin && systemEditing && (
+            <div className="flex items-center gap-2">
+              <Button onClick={handleSystemSave} disabled={updateSystemPrompt.isPending || !systemText.trim()}>
+                Save
+              </Button>
+              <Button variant="outline" onClick={cancelSystemEdit} disabled={updateSystemPrompt.isPending}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {!isSuperAdmin && (
+            <p className="text-sm text-muted-foreground">Only Super Admins can edit the default system template.</p>
+          )}
+          {systemError && <p className="text-sm text-red-600">{systemError}</p>}
+        </CardContent>
+      </Card>
 
       <div className="max-w-xs">
         <Label>Account</Label>
