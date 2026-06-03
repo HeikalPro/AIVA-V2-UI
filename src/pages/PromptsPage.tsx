@@ -108,7 +108,7 @@ export function PromptsPage() {
       <PageHeader
         icon={FileText}
         title="Prompts"
-        description="Manage AI prompts per account"
+        description="View the built-in system prompt and manage custom prompts per account"
         actions={<Button onClick={openCreate} disabled={!selectedAccountId}><Plus className="mr-2 h-4 w-4" /> New Prompt</Button>}
       />
 
@@ -160,7 +160,9 @@ export function PromptsPage() {
         </Select>
       </div>
 
-      <DataTable<Prompt>
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Custom Prompts</h2>
+        <DataTable<Prompt>
         columns={[
           { key: "id", header: "ID", sortable: true },
           { key: "prompt_name", header: "Name", sortable: true },
@@ -185,6 +187,7 @@ export function PromptsPage() {
         loading={isLoading}
         onRowClick={openEdit}
       />
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
