@@ -1,4 +1,5 @@
 import type { TokenResponse } from "@/types/api";
+import { ApiError, formatUserError, parseApiDetail, readHttpErrorMessage } from "@/lib/errors";
 
 const ACCESS_KEY = "aiva_access_token";
 const REFRESH_KEY = "aiva_refresh_token";
@@ -56,6 +57,11 @@ export type RequestOptions = {
   retry?: boolean;
 };
 
+function wrapFetchError(err: unknown): never {
+  if (err instanceof ApiError) throw err;
+  throw new ApiError(formatUserError(err, "api"));
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -70,36 +76,40 @@ async function request<T>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    wrapFetchError(err);
+  }
 
   if (res.status === 401 && options.auth !== false && options.retry !== false) {
     const ok = await tryRefresh();
     if (ok) return request(method, path, body, { ...options, retry: false });
     clearTokens();
-    throw new Error("Session expired. Please log in again.");
+    throw new ApiError(formatUserError(new Error("Session expired"), "api"), 401);
   }
 
   const text = await res.text();
-  let data: T;
-  try {
-    data = text ? (JSON.parse(text) as T) : ({} as T);
-  } catch {
-    data = text as T;
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      data = text;
+    }
   }
 
   if (!res.ok) {
-    const detail =
-      typeof data === "object" && data !== null && "detail" in data
-        ? String((data as { detail: unknown }).detail)
-        : res.statusText;
-    throw new Error(detail || `${res.status} ${res.statusText}`);
+    const detail = parseApiDetail(data);
+    throw new ApiError(detail || `Request failed (${res.status})`, res.status);
   }
 
-  return data;
+  return data as T;
 }
 
 export function apiGet<T>(path: string, auth = true) {
@@ -142,12 +152,17 @@ export async function apiStream(
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status}: ${text}`);
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  } catch (err) {
+    wrapFetchError(err);
   }
-  if (!res.body) throw new Error("No response body");
+
+  if (!res.ok) {
+    throw new ApiError(await readHttpErrorMessage(res), res.status);
+  }
+  if (!res.body) throw new ApiError("No response body from chat stream.", res.status);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

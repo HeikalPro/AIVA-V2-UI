@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Cpu, Plus, Trash2 } from "lucide-react";
+import { formatUserError } from "@/lib/errors";
 import { useLLMConfigs, useCreateLLMConfig, useUpdateLLMConfig, useDeleteLLMConfig } from "@/hooks/useLLMConfigs";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
@@ -72,7 +73,7 @@ export function LLMConfigsPage() {
       else await createConfig.mutateAsync(body);
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 

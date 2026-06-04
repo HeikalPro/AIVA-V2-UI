@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { setTokens } from "@/lib/api-client";
+import { formatUserError } from "@/lib/errors";
 
 export function ZohoCallbackPage() {
   const { refreshProfile } = useAuth();
@@ -33,7 +34,7 @@ export function ZohoCallbackPage() {
 
     refreshProfile()
       .then(() => setReady(true))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setError(formatUserError(err, "login")));
   }, [refreshProfile, searchParams]);
 
   if (ready) return <Navigate to="/" replace />;

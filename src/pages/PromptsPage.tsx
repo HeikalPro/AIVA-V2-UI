@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FileText, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import {
@@ -77,7 +78,7 @@ export function PromptsPage() {
       }
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
@@ -99,7 +100,7 @@ export function PromptsPage() {
       await updateSystemPrompt.mutateAsync({ prompt_text: systemText });
       setSystemEditing(false);
     } catch (e) {
-      setSystemError(e instanceof Error ? e.message : String(e));
+      setSystemError(formatUserError(e));
     }
   }
 

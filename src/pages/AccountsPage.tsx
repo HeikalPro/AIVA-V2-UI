@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Briefcase, Plus, Trash2, Users, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
 import { useAccounts, useCreateAccount, useDeleteAccount, useUpdateAccount } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
@@ -86,7 +87,7 @@ export function AccountsPage() {
       });
       setAddUserId("");
     } catch (e) {
-      setMembersError(e instanceof Error ? e.message : String(e));
+      setMembersError(formatUserError(e));
     }
   }
 
@@ -96,7 +97,7 @@ export function AccountsPage() {
     try {
       await unassignAccount.mutateAsync({ userId, accountId: membersAccount.id });
     } catch (e) {
-      setMembersError(e instanceof Error ? e.message : String(e));
+      setMembersError(formatUserError(e));
     }
   }
 
@@ -173,7 +174,7 @@ export function AccountsPage() {
       }
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
@@ -390,7 +391,7 @@ export function AccountsPage() {
               await deleteAccount.mutateAsync(deleteId);
               setDeleteId(null);
             } catch (e) {
-              setDeleteError(e instanceof Error ? e.message : String(e));
+              setDeleteError(formatUserError(e));
               setDeleteId(null);
             }
           }

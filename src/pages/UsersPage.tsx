@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2, Users, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
 import {
   useUsers,
@@ -152,7 +153,7 @@ export function UsersPage() {
       setEditing(updated);
       setAddAccountId("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
@@ -163,7 +164,7 @@ export function UsersPage() {
       const updated = await unassignAccount.mutateAsync({ userId: editing.id, accountId });
       setEditing(updated);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
@@ -232,7 +233,7 @@ export function UsersPage() {
       }
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 

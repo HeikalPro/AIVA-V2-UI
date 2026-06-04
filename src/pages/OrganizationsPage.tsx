@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Building2, Plus, Trash2 } from "lucide-react";
+import { formatUserError } from "@/lib/errors";
 import {
   useCreateOrganization,
   useDeleteOrganization,
@@ -107,7 +108,7 @@ export function OrganizationsPage() {
       }
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
@@ -119,7 +120,7 @@ export function OrganizationsPage() {
       setDeleteSuccess(result.message);
       setDeleteTarget(null);
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : String(e));
+      setDeleteError(formatUserError(e));
     }
   }
 

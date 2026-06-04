@@ -10,7 +10,9 @@ import {
   useSessionMessages,
   sendMessageStream,
 } from "@/hooks/useChat";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { formatQueryError, formatUserError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,7 +110,7 @@ export function ChatPage() {
       const result = await refetchMessages();
       applyMessages(result.data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e, "chat"));
     } finally {
       setLoadingHistory(false);
     }
@@ -124,7 +126,7 @@ export function ChatPage() {
       setLatency(null);
       localStorage.setItem(sessionStorageKey(selectedAccountId), String(session.id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e, "chat"));
     }
   }
 
@@ -165,7 +167,7 @@ export function ChatPage() {
       await qc.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
       await qc.invalidateQueries({ queryKey: ["chat-sessions", selectedAccountId] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e, "chat"));
     } finally {
       setStreaming(false);
     }
@@ -226,9 +228,7 @@ export function ChatPage() {
       </div>
 
       {accountsError && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {accountsLoadError instanceof Error ? accountsLoadError.message : "Failed to load accounts"}
-        </div>
+        <ErrorAlert message={formatQueryError(accountsLoadError)} />
       )}
       {!accountsError && accounts.length === 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -236,9 +236,7 @@ export function ChatPage() {
         </div>
       )}
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-      )}
+      <ErrorAlert message={error} />
 
       <div className="max-w-3xl space-y-3">
         {historyBusy && messages.length === 0 && (

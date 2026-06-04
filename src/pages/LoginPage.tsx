@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Eye, EyeOff, Lock, User } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +32,7 @@ export function LoginPage() {
     try {
       await login(email.trim(), password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatUserError(err, "login"));
     } finally {
       setLoading(false);
     }

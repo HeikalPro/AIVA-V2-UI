@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Ticket as TicketIcon, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
@@ -140,7 +141,7 @@ export function TicketsPage() {
       }
       setDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 

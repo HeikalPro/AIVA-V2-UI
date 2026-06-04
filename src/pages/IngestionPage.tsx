@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Eye, Plus, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
@@ -145,7 +146,7 @@ export function IngestionPage() {
       setViewing(updated);
       setViewOpen(false);
     } catch (e) {
-      setViewError(e instanceof Error ? e.message : String(e));
+      setViewError(formatUserError(e));
     }
   }
 
@@ -174,7 +175,7 @@ export function IngestionPage() {
       });
       setEmailNotify(created.developer_notify);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatUserError(e));
     }
   }
 
