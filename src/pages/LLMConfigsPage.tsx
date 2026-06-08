@@ -148,23 +148,14 @@ export function LLMConfigsPage() {
         loading={deleteConfig.isPending}
         onCancel={() => { setDeleteId(null); setDeleteError(null); }}
         onConfirm={async () => {
-          // #region agent log
-          fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:start',message:'delete confirm clicked',data:{deleteId},timestamp:Date.now(),hypothesisId:'H3',runId:'post-fix'})}).catch(()=>{});
-          // #endregion
           if (!deleteId) return;
           setDeleteError(null);
           try {
             await deleteConfig.mutateAsync(deleteId);
-            // #region agent log
-            fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:success',message:'delete mutation succeeded',data:{deleteId},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix'})}).catch(()=>{});
-            // #endregion
             setDeleteId(null);
             setDeleteError(null);
           } catch (e) {
             setDeleteError(formatUserError(e));
-            // #region agent log
-            fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:error',message:'delete mutation failed',data:{deleteId,error:String(e),name:(e as Error)?.name,status:(e as {status?:number})?.status},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
-            // #endregion
           }
         }}
       />
