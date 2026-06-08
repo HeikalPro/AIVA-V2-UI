@@ -21,6 +21,7 @@ export function LLMConfigsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LLMConfig | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [form, setForm] = useState({
     provider: "openai",
     model_name: "",
@@ -99,7 +100,7 @@ export function LLMConfigsPage() {
             render: (r) => (
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</Button>
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteId(r.id); }}>
+                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteError(null); setDeleteId(r.id); }}>
                   <Trash2 className="h-4 w-4 text-red-500" />
                 </Button>
               </div>
@@ -141,11 +142,31 @@ export function LLMConfigsPage() {
       <ConfirmDialog
         open={deleteId != null}
         title="Delete LLM config"
-        message="This action cannot be undone."
+        message="This action cannot be undone. Accounts using this config will fall back to the default LLM settings."
+        error={deleteError}
         destructive
         loading={deleteConfig.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={async () => { if (deleteId) await deleteConfig.mutateAsync(deleteId); setDeleteId(null); }}
+        onCancel={() => { setDeleteId(null); setDeleteError(null); }}
+        onConfirm={async () => {
+          // #region agent log
+          fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:start',message:'delete confirm clicked',data:{deleteId},timestamp:Date.now(),hypothesisId:'H3',runId:'post-fix'})}).catch(()=>{});
+          // #endregion
+          if (!deleteId) return;
+          setDeleteError(null);
+          try {
+            await deleteConfig.mutateAsync(deleteId);
+            // #region agent log
+            fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:success',message:'delete mutation succeeded',data:{deleteId},timestamp:Date.now(),hypothesisId:'H5',runId:'post-fix'})}).catch(()=>{});
+            // #endregion
+            setDeleteId(null);
+            setDeleteError(null);
+          } catch (e) {
+            setDeleteError(formatUserError(e));
+            // #region agent log
+            fetch('http://127.0.0.1:7810/ingest/b11a0305-32bc-48ad-ac2b-3f39b7a5fc7f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'086c7b'},body:JSON.stringify({sessionId:'086c7b',location:'LLMConfigsPage.tsx:onConfirm:error',message:'delete mutation failed',data:{deleteId,error:String(e),name:(e as Error)?.name,status:(e as {status?:number})?.status},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
+            // #endregion
+          }
+        }}
       />
     </div>
   );

@@ -5,6 +5,7 @@ type ConfirmDialogProps = {
   open: boolean;
   title: string;
   message: string;
+  error?: string | null;
   confirmLabel?: string;
   destructive?: boolean;
   loading?: boolean;
@@ -19,6 +20,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   destructive,
   loading,
+  error,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -29,6 +31,7 @@ export function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">{message}</p>
+        {error && <p className="text-sm text-red-600">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={loading}>
             Cancel
