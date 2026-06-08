@@ -123,8 +123,8 @@ export function DashboardPage() {
             <KPIStatCard label="Messages" value={stats?.total_messages ?? "—"} icon={<MessageSquare className="h-4 w-4" />} iconColor="bg-violet-100 text-violet-600" />
             <KPIStatCard label="AI Requests" value={stats?.total_ai_requests ?? "—"} icon={<Zap className="h-4 w-4" />} iconColor="bg-amber-100 text-amber-600" />
             <KPIStatCard label="Avg Response" value={stats?.avg_response_time_ms != null ? `${Math.round(stats.avg_response_time_ms)} ms` : "—"} icon={<Clock className="h-4 w-4" />} iconColor="bg-emerald-100 text-emerald-600" />
-            <KPIStatCard label="Input Tokens" value={stats?.total_input_tokens ?? "—"} icon={<Users className="h-4 w-4" />} iconColor="bg-sky-100 text-sky-600" />
-            <KPIStatCard label="Total Cost" value={stats?.total_cost != null ? `$${stats.total_cost.toFixed(2)}` : "—"} icon={<DollarSign className="h-4 w-4" />} iconColor="bg-rose-100 text-rose-600" />
+            <KPIStatCard label="Input Tokens" value={stats?.total_input_tokens != null ? stats.total_input_tokens.toLocaleString() : "—"} icon={<Users className="h-4 w-4" />} iconColor="bg-sky-100 text-sky-600" />
+            <KPIStatCard label="Total Cost" value={stats?.total_cost != null ? `$${stats.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "—"} icon={<DollarSign className="h-4 w-4" />} iconColor="bg-rose-100 text-rose-600" />
           </div>
 
           <div className="space-y-4">
