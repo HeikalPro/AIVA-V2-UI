@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type { Account, AccountCreate, AccountUpdate } from "@/types/api";
 
-export function useAccounts(organizationId?: number | null) {
+export function useAccounts(organizationId?: number | null, enabled = true) {
   const params = organizationId ? `?organization_id=${organizationId}` : "";
   return useQuery({
     queryKey: ["accounts", organizationId ?? "all"],
     queryFn: () => apiGet<Account[]>(`/api/accounts${params}`),
+    enabled,
   });
 }
 

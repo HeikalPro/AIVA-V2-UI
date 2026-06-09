@@ -15,7 +15,12 @@ export type NavItem = {
 };
 
 export const NAV_ITEMS: NavItem[] = [
-  { path: "/", label: "Dashboard", icon: "LayoutDashboard", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR] },
+  {
+    path: "/",
+    label: "Dashboard",
+    icon: "LayoutDashboard",
+    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
+  },
   { path: "/organizations", label: "Organizations", icon: "Building2", roles: [ROLES.SUPER_ADMIN] },
   { path: "/accounts", label: "Accounts", icon: "Briefcase", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER] },
   { path: "/users", label: "Users", icon: "Users", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER] },

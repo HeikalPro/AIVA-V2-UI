@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, Clock, DollarSign, LayoutDashboard, MessageSquare, Users, Zap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES, canAccess } from "@/lib/roles";
-import { useAccounts } from "@/hooks/useAccounts";
+import { formatUserError } from "@/lib/errors";
+import { useAccounts, useUpdateAccount } from "@/hooks/useAccounts";
 import { useAgentMetrics, useDashboardStats } from "@/hooks/useAnalytics";
+import { ApiKeyRenewalCard, toDateInputValue } from "@/components/shared/ApiKeyRenewalCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { KPIStatCard } from "@/components/shared/KPIStatCard";
 import { DataTable } from "@/components/shared/DataTable";
@@ -13,6 +15,9 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import type { AgentMetric } from "@/types/api";
 
+const RENEWAL_VIEW_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER];
+const ANALYTICS_VIEW_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR];
+
 function agentDisplayName(metric: AgentMetric): string {
   const name = [metric.agent_first_name, metric.agent_last_name].filter(Boolean).join(" ").trim();
   return name || metric.agent_email || `User #${metric.user_id}`;
@@ -21,13 +26,20 @@ function agentDisplayName(metric: AgentMetric): string {
 export function DashboardPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
+  const canViewRenewal = canAccess(user?.roles ?? [], RENEWAL_VIEW_ROLES);
+  const canViewAnalytics = canAccess(user?.roles ?? [], ANALYTICS_VIEW_ROLES);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
 
-  const { data: stats } = useDashboardStats(selectedAccountId);
-  const { data: agents = [], isLoading: agentsLoading } = useAgentMetrics(selectedAccountId);
+  const { data: stats } = useDashboardStats(selectedAccountId, canViewAnalytics);
+  const { data: agents = [], isLoading: agentsLoading } = useAgentMetrics(selectedAccountId, canViewAnalytics);
+  const updateAccount = useUpdateAccount();
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
 
+  const [renewalDate, setRenewalDate] = useState("");
+  const [renewalError, setRenewalError] = useState<string | null>(null);
+  const [renewalSaved, setRenewalSaved] = useState(false);
   const [search, setSearch] = useState("");
   const [usageFilter, setUsageFilter] = useState("ALL");
   const [escalationFilter, setEscalationFilter] = useState("ALL");
@@ -39,6 +51,43 @@ export function DashboardPage() {
     setEscalationFilter("ALL");
     setResponseFilter("ALL");
   }, [selectedAccountId]);
+
+  useEffect(() => {
+    setRenewalDate(toDateInputValue(selectedAccount?.api_key_renewal_date));
+    setRenewalError(null);
+    setRenewalSaved(false);
+  }, [selectedAccountId, selectedAccount?.api_key_renewal_date]);
+
+  async function handleRenewalSave() {
+    if (!selectedAccountId || !renewalDate) return;
+    setRenewalError(null);
+    setRenewalSaved(false);
+    try {
+      await updateAccount.mutateAsync({
+        id: selectedAccountId,
+        body: { api_key_renewal_date: renewalDate },
+      });
+      setRenewalSaved(true);
+    } catch (e) {
+      setRenewalError(formatUserError(e));
+    }
+  }
+
+  async function handleRenewalClear() {
+    if (!selectedAccountId) return;
+    setRenewalDate("");
+    setRenewalError(null);
+    setRenewalSaved(false);
+    try {
+      await updateAccount.mutateAsync({
+        id: selectedAccountId,
+        body: { api_key_renewal_date: null },
+      });
+      setRenewalSaved(true);
+    } catch (e) {
+      setRenewalError(formatUserError(e));
+    }
+  }
 
   const filteredAgents = useMemo(
     () =>
@@ -86,7 +135,7 @@ export function DashboardPage() {
     setResponseFilter("ALL");
   }
 
-  if (!canAccess(user?.roles ?? [], [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR])) {
+  if (!canViewRenewal) {
     return <p className="text-sm text-muted-foreground">You do not have access to the dashboard.</p>;
   }
 
@@ -95,7 +144,11 @@ export function DashboardPage() {
       <PageHeader
         icon={LayoutDashboard}
         title="Dashboard"
-        description="Analytics overview for your account"
+        description={
+          canViewAnalytics
+            ? "Analytics overview for your account"
+            : "Account information for your assigned account(s)"
+        }
       />
 
       <div className="max-w-xs">
@@ -118,6 +171,21 @@ export function DashboardPage() {
         <p className="text-sm text-muted-foreground">Select an account to view analytics.</p>
       ) : (
         <>
+          <ApiKeyRenewalCard
+            accountName={selectedAccount?.name ?? "—"}
+            renewalDate={selectedAccount?.api_key_renewal_date}
+            editable={isSuperAdmin}
+            draftDate={renewalDate}
+            onDraftDateChange={setRenewalDate}
+            onSave={handleRenewalSave}
+            onClear={handleRenewalClear}
+            saving={updateAccount.isPending}
+            error={renewalError}
+            successMessage={renewalSaved ? "Renewal date saved." : null}
+          />
+
+          {canViewAnalytics && (
+          <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <KPIStatCard label="Sessions" value={stats?.total_sessions ?? "—"} icon={<Activity className="h-4 w-4" />} iconColor="bg-blue-100 text-blue-600" />
             <KPIStatCard label="Messages" value={stats?.total_messages ?? "—"} icon={<MessageSquare className="h-4 w-4" />} iconColor="bg-violet-100 text-violet-600" />
@@ -209,6 +277,8 @@ export function DashboardPage() {
               }
             />
           </div>
+          </>
+          )}
         </>
       )}
     </div>

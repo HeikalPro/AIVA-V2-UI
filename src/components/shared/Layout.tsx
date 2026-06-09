@@ -19,6 +19,7 @@ import { NAV_ITEMS, ROLES, canAccess, displayRole } from "@/lib/roles";
 import { useIngestionPendingCount } from "@/hooks/useIngestion";
 import { useTicketOpenCount } from "@/hooks/useTickets";
 import { Button } from "@/components/ui/button";
+import { AccountApiKeyRenewalBanner } from "@/components/shared/AccountApiKeyRenewalBanner";
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard,
@@ -202,6 +203,7 @@ export function Layout() {
             <p className="truncate text-sm font-semibold text-slate-800">{currentPage?.label ?? "AIVA"}</p>
             <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
           </div>
+          <AccountApiKeyRenewalBanner />
         </header>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden pt-16">
