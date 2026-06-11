@@ -1,19 +1,28 @@
 import { type FormEvent, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Lock, User } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
+import { isZohoLoginEnabled } from "@/lib/zoho-login";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function LoginPage() {
   const { login, loginWithZoho, user, loading: authLoading } = useAuth();
+  const location = useLocation();
+  const flash = location.state as { verified?: boolean; reset?: boolean } | null;
+  const info = flash?.verified
+    ? "Email verified. You can sign in now."
+    : flash?.reset
+      ? "Password updated. Please sign in."
+      : null;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const zohoLoginEnabled = isZohoLoginEnabled();
 
   if (authLoading) {
     return (
@@ -68,7 +77,12 @@ export function LoginPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link to="/forgot-password" className="text-xs font-medium text-slate-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
                 <Input
@@ -92,9 +106,21 @@ export function LoginPage() {
               </div>
             </div>
 
+            {info && (
+              <div className="rounded-xl border border-green-200 bg-green-50 px-3.5 py-3 text-sm text-green-800" role="status">
+                {info}
+              </div>
+            )}
             {error && (
               <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">
                 {error}
+                {error.toLowerCase().includes("verify your email") ? (
+                  <p className="mt-2">
+                    <Link to="/verify-email" className="font-medium underline">
+                      Go to email verification
+                    </Link>
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -102,24 +128,35 @@ export function LoginPage() {
               {loading ? "Signing in..." : "Sign in"}
             </Button>
 
-            <div className="relative flex items-center gap-3 py-1">
-              <div className="h-px flex-1 bg-slate-200" />
-              <span className="text-xs text-slate-400">or</span>
-              <div className="h-px flex-1 bg-slate-200" />
-            </div>
+            {zohoLoginEnabled ? (
+              <>
+                <div className="relative flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span className="text-xs text-slate-400">or</span>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
 
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 w-full rounded-xl text-sm font-semibold"
-              disabled={loading}
-              onClick={() => {
-                setLoading(true);
-                loginWithZoho();
-              }}
-            >
-              Sign in with Zoho
-            </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full rounded-xl text-sm font-semibold"
+                  disabled={loading}
+                  onClick={() => {
+                    setLoading(true);
+                    loginWithZoho();
+                  }}
+                >
+                  Sign in with Zoho
+                </Button>
+              </>
+            ) : null}
+
+            <p className="text-center text-sm text-slate-500">
+              No account?{" "}
+              <Link to="/signup" className="font-medium text-slate-800 hover:underline">
+                Sign up
+              </Link>
+            </p>
           </form>
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">GoChat247 · AIVA</p>

@@ -18,13 +18,10 @@ type ValidationItem = {
   message?: string;
 };
 
-/** Parse FastAPI `detail` from JSON body (string, array, or nested). */
+/** Parse FastAPI `detail`, slowapi `error`, or other API error JSON bodies. */
 export function parseApiDetail(data: unknown): string {
   if (data === null || data === undefined) return "";
   if (typeof data === "string") return data.trim();
-  if (typeof data === "object" && "detail" in (data as object)) {
-    return parseApiDetail((data as { detail: unknown }).detail);
-  }
   if (Array.isArray(data)) {
     const parts: string[] = [];
     for (const item of data) {
@@ -41,7 +38,13 @@ export function parseApiDetail(data: unknown): string {
     }
     return parts.join("; ") || "Validation error";
   }
-  return String(data);
+  if (typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if ("detail" in obj) return parseApiDetail(obj.detail);
+    if (typeof obj.error === "string" && obj.error.trim()) return obj.error.trim();
+    if (typeof obj.message === "string" && obj.message.trim()) return obj.message.trim();
+  }
+  return "";
 }
 
 function isNetworkFailure(err: unknown): boolean {
