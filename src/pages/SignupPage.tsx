@@ -2,18 +2,20 @@ import { type FormEvent, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthShell } from "@/components/auth/AuthShell";
+import { LoginEmailField } from "@/components/auth/LoginEmailField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signup, setVerifyEmail } from "@/lib/auth-api";
 import { formatUserError } from "@/lib/errors";
+import { buildLoginEmail } from "@/lib/login-email";
 import { PASSWORD_MIN_LENGTH, passwordHint } from "@/lib/password-hint";
 
 export function SignupPage() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [emailLocal, setEmailLocal] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -33,13 +35,14 @@ export function SignupPage() {
     setLoading(true);
     setError(null);
     try {
+      const email = buildLoginEmail(emailLocal).toLowerCase();
       await signup({
         name: name.trim(),
-        email: email.trim(),
+        email,
         password,
         confirmPassword,
       });
-      setVerifyEmail(email.trim().toLowerCase());
+      setVerifyEmail(email);
       navigate("/verify-email");
     } catch (err) {
       setError(formatUserError(err, "api"));
@@ -63,18 +66,7 @@ export function SignupPage() {
             className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
-          <Input
-            id="email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
-          />
-        </div>
+        <LoginEmailField localPart={emailLocal} onLocalPartChange={setEmailLocal} />
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
           <Input

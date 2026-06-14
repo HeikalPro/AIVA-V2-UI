@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { DEFAULT_LOGIN_EMAIL_DOMAIN, LoginEmailField } from "@/components/auth/LoginEmailField";
+import { LoginEmailField } from "@/components/auth/LoginEmailField";
 import { formatUserError } from "@/lib/errors";
 import { isZohoLoginEnabled } from "@/lib/zoho-login";
 import { buildLoginEmail } from "@/lib/login-email";
@@ -20,8 +20,6 @@ export function LoginPage() {
       ? "Password updated. Please sign in."
       : null;
   const [emailLocal, setEmailLocal] = useState("");
-  const [emailDomain, setEmailDomain] = useState(DEFAULT_LOGIN_EMAIL_DOMAIN);
-  const [customDomain, setCustomDomain] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -43,7 +41,7 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(buildLoginEmail(emailLocal, emailDomain, customDomain), password);
+      await login(buildLoginEmail(emailLocal), password);
     } catch (err) {
       setError(formatUserError(err, "login"));
     } finally {
@@ -64,11 +62,7 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <LoginEmailField
               localPart={emailLocal}
-              domain={emailDomain}
-              customDomain={customDomain}
               onLocalPartChange={setEmailLocal}
-              onDomainChange={setEmailDomain}
-              onCustomDomainChange={setCustomDomain}
               autoFocus
             />
 
