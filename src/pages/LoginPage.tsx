@@ -1,9 +1,11 @@
 import { type FormEvent, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
-import { Eye, EyeOff, Lock, User } from "lucide-react";
+import { Eye, EyeOff, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { DEFAULT_LOGIN_EMAIL_DOMAIN, LoginEmailField } from "@/components/auth/LoginEmailField";
 import { formatUserError } from "@/lib/errors";
 import { isZohoLoginEnabled } from "@/lib/zoho-login";
+import { buildLoginEmail } from "@/lib/login-email";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +19,9 @@ export function LoginPage() {
     : flash?.reset
       ? "Password updated. Please sign in."
       : null;
-  const [email, setEmail] = useState("");
+  const [emailLocal, setEmailLocal] = useState("");
+  const [emailDomain, setEmailDomain] = useState(DEFAULT_LOGIN_EMAIL_DOMAIN);
+  const [customDomain, setCustomDomain] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,7 +43,7 @@ export function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(email.trim(), password);
+      await login(buildLoginEmail(emailLocal, emailDomain, customDomain), password);
     } catch (err) {
       setError(formatUserError(err, "login"));
     } finally {
@@ -58,23 +62,15 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-slate-400" />
-                <Input
-                  id="email"
-                  type="text"
-                  autoComplete="username"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoFocus
-                  className="h-11 rounded-xl border-slate-200 bg-slate-50 pl-10 focus:bg-white"
-                />
-              </div>
-            </div>
+            <LoginEmailField
+              localPart={emailLocal}
+              domain={emailDomain}
+              customDomain={customDomain}
+              onLocalPartChange={setEmailLocal}
+              onDomainChange={setEmailDomain}
+              onCustomDomainChange={setCustomDomain}
+              autoFocus
+            />
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
