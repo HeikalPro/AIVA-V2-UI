@@ -49,6 +49,7 @@ export function UsersPage() {
   const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN);
   const isAccountManager = user?.roles.includes(ROLES.ACCOUNT_MANAGER);
   const canCreateUsers = isSuperAdmin || isOrgAdmin;
+  const canDeleteUsers = isSuperAdmin || isOrgAdmin;
   const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
@@ -63,6 +64,8 @@ export function UsersPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [addAccountId, setAddAccountId] = useState("");
   const [form, setForm] = useState({
     organization_id: "",
@@ -346,9 +349,19 @@ export function UsersPage() {
             render: (r) => (
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</Button>
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteId(r.id); }}>
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
+                {canDeleteUsers && r.id !== user?.id ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteError(null);
+                      setDeleteId(r.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                ) : null}
               </div>
             ),
           },
@@ -490,11 +503,34 @@ export function UsersPage() {
       <ConfirmDialog
         open={deleteId != null}
         title="Delete user"
-        message="This action cannot be undone."
+        message={
+          deleteBusy
+            ? "Deleting user…"
+            : "This permanently removes the user and cannot be undone."
+        }
         destructive
-        loading={deleteUser.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={async () => { if (deleteId) await deleteUser.mutateAsync(deleteId); setDeleteId(null); }}
+        loading={deleteBusy}
+        confirmLabel="Delete"
+        error={deleteError}
+        onCancel={() => {
+          if (deleteBusy) return;
+          setDeleteId(null);
+          setDeleteError(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteId || deleteBusy) return;
+          setDeleteError(null);
+          setDeleteBusy(true);
+          try {
+            await deleteUser.mutateAsync(deleteId);
+            setDeleteId(null);
+            setDeleteError(null);
+          } catch (e) {
+            setDeleteError(formatUserError(e));
+          } finally {
+            setDeleteBusy(false);
+          }
+        }}
       />
     </div>
   );
