@@ -68,7 +68,6 @@ export type Account = {
   description: string | null;
   corpus_id: string | null;
   status: string;
-  api_key_renewal_date?: string | null;
   created_at?: string | null;
 };
 
@@ -87,7 +86,6 @@ export type AccountUpdate = {
   corpus_id?: string | null;
   llm_config_id?: number | null;
   status?: string;
-  api_key_renewal_date?: string | null;
 };
 
 export type User = {
