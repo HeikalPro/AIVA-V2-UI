@@ -23,9 +23,9 @@ export function TicketsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const canSubmitTickets =
-    !isSuperAdmin &&
     !!user &&
-    (user.roles.includes(ROLES.ORG_ADMIN) ||
+    (user.roles.includes(ROLES.SUPER_ADMIN) ||
+      user.roles.includes(ROLES.ORG_ADMIN) ||
       user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
       user.roles.includes(ROLES.SUPERVISOR) ||
       user.roles.includes(ROLES.DEVELOPER));
@@ -46,6 +46,7 @@ export function TicketsPage() {
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
   const [form, setForm] = useState({
+    organization_id: "",
     account_id: "",
     ticket_type: "SUPPORT",
     status: "OPEN",
@@ -91,9 +92,29 @@ export function TicketsPage() {
     [data, search, statusFilter, typeFilter, orgFilter, organizationNameById, accountNameById],
   );
 
+  const createAccounts = useMemo(() => {
+    if (!isSuperAdmin) return accounts;
+    const orgId = form.organization_id ? Number(form.organization_id) : null;
+    return orgId ? accounts.filter((a) => a.organization_id === orgId) : accounts;
+  }, [accounts, form.organization_id, isSuperAdmin]);
+
+  function defaultCreateOrganizationId(): string {
+    if (!isSuperAdmin) return String(user?.organization_id ?? "");
+    const orgWithAccounts = organizations.find((o) => accounts.some((a) => a.organization_id === o.id));
+    return String(orgWithAccounts?.id ?? organizations[0]?.id ?? "");
+  }
+
   function openCreate() {
     setEditing(null);
-    setForm({ account_id: "", ticket_type: "SUPPORT", status: "OPEN", subject: "", description: "", assigned_to: "" });
+    setForm({
+      organization_id: defaultCreateOrganizationId(),
+      account_id: "",
+      ticket_type: "SUPPORT",
+      status: "OPEN",
+      subject: "",
+      description: "",
+      assigned_to: "",
+    });
     setError(null);
     setEmailNotify(null);
     setDialogOpen(true);
@@ -130,7 +151,7 @@ export function TicketsPage() {
         });
       } else {
         const created = await createTicket.mutateAsync({
-          organization_id: user!.organization_id,
+          organization_id: isSuperAdmin ? Number(form.organization_id) : user!.organization_id,
           account_id: form.account_id ? Number(form.account_id) : null,
           ticket_type: form.ticket_type,
           subject: form.subject,
@@ -278,13 +299,33 @@ export function TicketsPage() {
           <DialogBody className="min-h-0 flex-1 px-6 py-4">
           <div className="space-y-4">
             {!editing && (
-              <div>
-                <Label>Account</Label>
-                <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="mt-1">
-                  <option value="">None</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </Select>
-              </div>
+              <>
+                {isSuperAdmin && (
+                  <div>
+                    <Label>Organization</Label>
+                    <Select
+                      value={form.organization_id}
+                      onChange={(e) => setForm({ ...form, organization_id: e.target.value, account_id: "" })}
+                      className="mt-1"
+                    >
+                      {organizations.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                <div>
+                  <Label>Account</Label>
+                  <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="mt-1">
+                    <option value="">None</option>
+                    {createAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}{isSuperAdmin && !form.organization_id ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </>
             )}
             <div><Label>Subject</Label><Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} className="mt-1" /></div>
             <div>

@@ -50,9 +50,11 @@ export function IngestionPage() {
   const isDeveloper = user?.roles.includes(ROLES.DEVELOPER);
   const canManageIngestion = isSuperAdmin || isDeveloper;
   const canCreateRequest =
-    !isSuperAdmin &&
     !!user &&
-    (user.roles.includes(ROLES.ACCOUNT_MANAGER) || user.roles.includes(ROLES.SUPERVISOR));
+    (user.roles.includes(ROLES.SUPER_ADMIN) ||
+      user.roles.includes(ROLES.ORG_ADMIN) ||
+      user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
+      user.roles.includes(ROLES.SUPERVISOR));
 
   const { data: pendingBadge } = useIngestionPendingCount(isSuperAdmin ?? false);
   const pendingCount = pendingBadge?.pending_count ?? 0;
@@ -521,7 +523,9 @@ export function IngestionPage() {
                 >
                   <option value="">Select account</option>
                   {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
+                    <option key={a.id} value={a.id}>
+                      {a.name}{isSuperAdmin ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
+                    </option>
                   ))}
                 </Select>
               </div>

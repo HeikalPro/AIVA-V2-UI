@@ -207,15 +207,19 @@ export function UsersPage() {
     setError(null);
     try {
       if (editing) {
-        await updateUser.mutateAsync({
+        const orgChanged =
+          isSuperAdmin && Number(form.organization_id) !== editing.organization_id;
+        const updated = await updateUser.mutateAsync({
           id: editing.id,
           body: {
+            ...(orgChanged ? { organization_id: Number(form.organization_id) } : {}),
             email: form.email,
             first_name: form.first_name || null,
             last_name: form.last_name || null,
             status: form.status,
           },
         });
+        setEditing(updated);
         if (isSuperAdmin) {
           await setUserRole.mutateAsync({
             userId: editing.id,
@@ -377,15 +381,20 @@ export function UsersPage() {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editing ? "Edit User" : "New User"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            {!editing && isSuperAdmin && (
+            {isSuperAdmin && (
               <div>
                 <Label>Organization</Label>
                 <Select value={form.organization_id} onChange={(e) => setForm({ ...form, organization_id: e.target.value, account_id: "" })} className="mt-1">
                   {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </Select>
-                {createOrgId && createAccounts.length === 0 && (
+                {!editing && createOrgId && createAccounts.length === 0 && (
                   <p className="mt-1 text-sm text-amber-700">
                     No accounts in this organization. Create an account first, or pick another organization (e.g. GoChat247 for Hallan).
+                  </p>
+                )}
+                {editing && Number(form.organization_id) !== editing.organization_id && (
+                  <p className="mt-1 text-sm text-amber-700">
+                    Changing organization removes account access for accounts outside the new organization.
                   </p>
                 )}
               </div>

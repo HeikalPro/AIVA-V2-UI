@@ -32,7 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
     path: "/ingestion",
     label: "Ingestion",
     icon: "Upload",
-    roles: [ROLES.SUPER_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
+    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
   },
 ];
 

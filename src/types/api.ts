@@ -114,6 +114,7 @@ export type UserCreate = {
 };
 
 export type UserUpdate = {
+  organization_id?: number;
   email?: string;
   password?: string;
   first_name?: string | null;

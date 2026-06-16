@@ -91,7 +91,7 @@ export function App() {
             <Route
               path="ingestion"
               element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
                   <IngestionPage />
                 </ProtectedRoute>
               }
