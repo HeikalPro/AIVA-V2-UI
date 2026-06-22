@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  ThumbsUp,
   Ticket,
   Upload,
   Users,
@@ -29,6 +30,7 @@ const ICONS: Record<string, LucideIcon> = {
   Cpu,
   MessageSquare,
   Ticket,
+  ThumbsUp,
   Upload,
 };
 

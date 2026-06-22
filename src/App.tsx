@@ -17,6 +17,7 @@ import { LLMConfigsPage } from "@/pages/LLMConfigsPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
+import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 
 export function App() {
   return (
@@ -69,6 +70,14 @@ export function App() {
               element={
                 <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
                   <LLMConfigsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="message-ratings"
+              element={
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
+                  <MessageRatingsPage />
                 </ProtectedRoute>
               }
             />

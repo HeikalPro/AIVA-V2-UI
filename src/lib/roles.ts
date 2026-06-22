@@ -26,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/users", label: "Users", icon: "Users", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER] },
   { path: "/prompts", label: "Prompts", icon: "FileText", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER] },
   { path: "/llm-configs", label: "LLM Configs", icon: "Cpu", roles: [ROLES.SUPER_ADMIN] },
+  { path: "/message-ratings", label: "Message feedback", icon: "ThumbsUp", roles: [ROLES.SUPER_ADMIN] },
   { path: "/chat", label: "Chat", icon: "MessageSquare", roles: [ROLES.AGENT, ROLES.SUPERVISOR] },
   { path: "/tickets", label: "Tickets", icon: "Ticket", roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER] },
   {

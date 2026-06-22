@@ -191,6 +191,26 @@ export type ChatMessage = {
   completion_tokens: number | null;
   latency_ms: number | null;
   created_at?: string | null;
+  rating?: "up" | "down" | null;
+  feedback?: string | null;
+  rated_at?: string | null;
+};
+
+export type MessageRating = {
+  message_id: number;
+  session_id: number;
+  account_id: number;
+  account_name: string | null;
+  organization_id: number;
+  organization_name: string | null;
+  agent_user_id: number;
+  agent_email: string | null;
+  agent_first_name: string | null;
+  agent_last_name: string | null;
+  message_text: string;
+  rating: "up" | "down";
+  feedback: string | null;
+  rated_at: string | null;
 };
 
 export type Ticket = {
