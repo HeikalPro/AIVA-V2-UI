@@ -27,6 +27,8 @@ import type { Prompt } from "@/types/api";
 export function PromptsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
+  const canEditSystemPrompt =
+    isSuperAdmin || user?.roles.includes(ROLES.DEVELOPER) === true;
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
@@ -122,7 +124,7 @@ export function PromptsPage() {
               {systemPrompt?.updated_at ? ` Last updated ${systemPrompt.updated_at}.` : ""}
             </CardDescription>
           </div>
-          {isSuperAdmin && !systemEditing && (
+          {canEditSystemPrompt && !systemEditing && (
             <Button variant="outline" size="sm" onClick={startSystemEdit} disabled={systemPromptLoading}>
               Edit
             </Button>
@@ -132,12 +134,12 @@ export function PromptsPage() {
           <textarea
             value={systemText}
             onChange={(e) => setSystemText(e.target.value)}
-            readOnly={!isSuperAdmin || !systemEditing}
+            readOnly={!canEditSystemPrompt || !systemEditing}
             rows={8}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-default disabled:opacity-100 read-only:bg-muted/30"
             placeholder={systemPromptLoading ? "Loading default system template..." : undefined}
           />
-          {isSuperAdmin && systemEditing && (
+          {canEditSystemPrompt && systemEditing && (
             <div className="flex items-center gap-2">
               <Button onClick={handleSystemSave} disabled={updateSystemPrompt.isPending || !systemText.trim()}>
                 Save
@@ -147,8 +149,10 @@ export function PromptsPage() {
               </Button>
             </div>
           )}
-          {!isSuperAdmin && (
-            <p className="text-sm text-muted-foreground">Only Super Admins can edit the default system template.</p>
+          {!canEditSystemPrompt && (
+            <p className="text-sm text-muted-foreground">
+              Only Super Admins and Developers can edit the default system template.
+            </p>
           )}
           {systemError && <p className="text-sm text-red-600">{systemError}</p>}
         </CardContent>

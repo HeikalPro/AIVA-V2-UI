@@ -60,7 +60,7 @@ export function App() {
             <Route
               path="prompts"
               element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER]}>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.DEVELOPER]}>
                   <PromptsPage />
                 </ProtectedRoute>
               }
@@ -68,7 +68,7 @@ export function App() {
             <Route
               path="llm-configs"
               element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.DEVELOPER]}>
                   <LLMConfigsPage />
                 </ProtectedRoute>
               }
