@@ -139,10 +139,17 @@ export function startZohoLogin() {
   window.location.href = `${backendUrl()}/api/auth/zoho/login?redirect=true&return_to=${returnTo}`;
 }
 
+export type ChatStreamEvent = {
+  type: string;
+  text?: string;
+  message?: string;
+  latency_ms?: number;
+};
+
 export async function apiStream(
   path: string,
   body: unknown,
-  onEvent: (event: { type: string; text?: string; latency_ms?: number }) => void,
+  onEvent: (event: ChatStreamEvent) => void,
 ): Promise<void> {
   const url = `${baseUrl()}${path}`;
   const token = getAccessToken();
@@ -177,7 +184,7 @@ export async function apiStream(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
       try {
-        onEvent(JSON.parse(line.slice(6)) as { type: string; text?: string; latency_ms?: number });
+        onEvent(JSON.parse(line.slice(6)) as ChatStreamEvent);
       } catch {
         /* ignore malformed SSE */
       }

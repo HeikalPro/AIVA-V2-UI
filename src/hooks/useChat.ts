@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost, apiStream } from "@/lib/api-client";
+import { apiGet, apiPost, apiStream, type ChatStreamEvent } from "@/lib/api-client";
 import type { ChatMessage, ChatSession } from "@/types/api";
 
 export function useChatSessions(accountId: number | null) {
@@ -33,7 +33,7 @@ export async function sendMessageStream(
   sessionId: number,
   messageText: string,
   topK = 10,
-  onEvent: (event: { type: string; text?: string; latency_ms?: number }) => void,
+  onEvent: (event: ChatStreamEvent) => void,
 ) {
   await apiStream(`/api/chat/sessions/${sessionId}/messages`, { message_text: messageText, top_k: topK }, onEvent);
 }

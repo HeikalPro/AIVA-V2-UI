@@ -162,6 +162,16 @@ export function ChatPage() {
             return copy;
           });
         }
+        if (ev.type === "error" && ev.message) {
+          assistant = assistant.trim()
+            ? `${assistant}\n\nError: ${ev.message}`
+            : `Error: ${ev.message}`;
+          setMessages((prev) => {
+            const copy = [...prev];
+            copy[copy.length - 1] = { role: "AI", text: assistant };
+            return copy;
+          });
+        }
         if (ev.type === "done" && ev.latency_ms !== undefined) setLatency(ev.latency_ms);
       });
       await qc.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
