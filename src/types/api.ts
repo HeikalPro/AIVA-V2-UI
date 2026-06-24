@@ -252,6 +252,33 @@ export type TicketUpdate = {
   description?: string;
 };
 
+export type AccountAnnouncement = {
+  id: number;
+  account_id: number;
+  account_name?: string | null;
+  organization_id?: number | null;
+  organization_name?: string | null;
+  title: string;
+  body: string;
+  is_active: boolean;
+  created_by: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type AccountAnnouncementCreate = {
+  account_id: number;
+  title: string;
+  body: string;
+  is_active?: boolean;
+};
+
+export type AccountAnnouncementUpdate = {
+  title?: string;
+  body?: string;
+  is_active?: boolean;
+};
+
 export type IngestionRequest = {
   id: number;
   account_id: number;

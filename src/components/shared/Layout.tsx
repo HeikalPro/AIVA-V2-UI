@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Briefcase,
   Building2,
+  Bell,
   Cpu,
   FileText,
   LayoutDashboard,
@@ -32,6 +33,7 @@ const ICONS: Record<string, LucideIcon> = {
   Ticket,
   ThumbsUp,
   Upload,
+  Bell,
 };
 
 function NavItem({

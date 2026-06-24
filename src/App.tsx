@@ -18,6 +18,7 @@ import { ChatPage } from "@/pages/ChatPage";
 import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
+import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
 
 export function App() {
   return (
@@ -78,6 +79,14 @@ export function App() {
               element={
                 <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
                   <MessageRatingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="account-updates"
+              element={
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR]}>
+                  <AccountUpdatesPage />
                 </ProtectedRoute>
               }
             />
