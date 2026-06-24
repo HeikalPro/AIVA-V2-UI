@@ -123,6 +123,7 @@ export function TicketsPage() {
   function openEdit(t: Ticket) {
     setEditing(t);
     setForm({
+      organization_id: String(t.organization_id),
       account_id: t.account_id != null ? String(t.account_id) : "",
       ticket_type: t.ticket_type ?? "SUPPORT",
       status: t.status ?? "OPEN",

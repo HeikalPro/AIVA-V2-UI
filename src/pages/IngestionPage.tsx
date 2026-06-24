@@ -406,6 +406,8 @@ export function IngestionPage() {
           },
         ]}
         onClear={clearFilters}
+        totalCount={data.length}
+        filteredCount={filteredData.length}
       />
 
       <DataTable<IngestionRequest>
