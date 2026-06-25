@@ -144,6 +144,7 @@ export type ChatStreamEvent = {
   text?: string;
   message?: string;
   latency_ms?: number;
+  sources?: { parent_id: string; url: string }[];
 };
 
 export async function apiStream(

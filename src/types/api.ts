@@ -182,6 +182,11 @@ export type ChatSession = {
   message_count?: number | null;
 };
 
+export type KbSource = {
+  parent_id: string;
+  url: string;
+};
+
 export type ChatMessage = {
   id: number;
   session_id: number;
@@ -194,6 +199,7 @@ export type ChatMessage = {
   rating?: "up" | "down" | null;
   feedback?: string | null;
   rated_at?: string | null;
+  sources?: KbSource[];
 };
 
 export type MessageRating = {
