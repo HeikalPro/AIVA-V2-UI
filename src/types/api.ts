@@ -68,7 +68,7 @@ export type Account = {
   description: string | null;
   corpus_id: string | null;
   status: string;
-  /** Base URL for KB source links; {url}/{external_parent_id}. Falls back to server default if empty. */
+  /** URL template for KB source links; append ID or use {id}. Falls back to server default if empty. */
   kb_source_base_url?: string | null;
   created_at?: string | null;
 };

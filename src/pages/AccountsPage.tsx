@@ -302,12 +302,12 @@ export function AccountsPage() {
               <Input
                 value={form.kb_source_base_url}
                 onChange={(e) => setForm({ ...form, kb_source_base_url: e.target.value })}
-                placeholder="http://192.168.1.13/halankb/index.php"
+                placeholder="http://192.168.1.13/halankb/view.php?id="
                 className="mt-1"
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Link base for agent source buttons. Article ID is appended automatically (e.g. …/index.php/158).
-                Leave empty to use the server default.
+                URL template for source links. The article ID is appended at the end (e.g. …view.php?id=158)
+                or use {"{id}"} anywhere (e.g. …/article/{"{id}"}). Leave empty to use the server default.
               </p>
             </div>
             <div>
