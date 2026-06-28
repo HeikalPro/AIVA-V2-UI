@@ -20,12 +20,14 @@ import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { LoginEmailField } from "@/components/auth/LoginEmailField";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { buildLoginEmail, parseLoginLocalPart } from "@/lib/login-email";
 import type { User } from "@/types/api";
 
 const ROLE_OPTIONS = [
@@ -69,7 +71,7 @@ export function UsersPage() {
   const [addAccountId, setAddAccountId] = useState("");
   const [form, setForm] = useState({
     organization_id: "",
-    email: "",
+    emailLocal: "",
     password: "",
     first_name: "",
     last_name: "",
@@ -115,7 +117,7 @@ export function UsersPage() {
     setEditing(null);
     setForm({
       organization_id: defaultCreateOrganizationId(),
-      email: "",
+      emailLocal: "",
       password: "",
       first_name: "",
       last_name: "",
@@ -132,7 +134,7 @@ export function UsersPage() {
     setEditing(u);
     setForm({
       organization_id: String(u.organization_id),
-      email: u.email,
+      emailLocal: parseLoginLocalPart(u.email),
       password: "",
       first_name: u.first_name ?? "",
       last_name: u.last_name ?? "",
@@ -205,6 +207,11 @@ export function UsersPage() {
 
   async function handleSave() {
     setError(null);
+    const email = buildLoginEmail(form.emailLocal).toLowerCase();
+    if (!email) {
+      setError("Email is required.");
+      return;
+    }
     try {
       if (editing) {
         const orgChanged =
@@ -213,7 +220,7 @@ export function UsersPage() {
           id: editing.id,
           body: {
             ...(orgChanged ? { organization_id: Number(form.organization_id) } : {}),
-            email: form.email,
+            email,
             first_name: form.first_name || null,
             last_name: form.last_name || null,
             status: form.status,
@@ -229,7 +236,7 @@ export function UsersPage() {
       } else {
         await createUser.mutateAsync({
           organization_id: Number(form.organization_id),
-          email: form.email,
+          email,
           password: form.password,
           first_name: form.first_name || null,
           last_name: form.last_name || null,
@@ -399,7 +406,10 @@ export function UsersPage() {
                 )}
               </div>
             )}
-            <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1" /></div>
+            <LoginEmailField
+              localPart={form.emailLocal}
+              onLocalPartChange={(emailLocal) => setForm({ ...form, emailLocal })}
+            />
             {!editing && (
               <div>
                 <Label>Password</Label>
