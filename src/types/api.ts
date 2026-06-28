@@ -68,6 +68,8 @@ export type Account = {
   description: string | null;
   corpus_id: string | null;
   status: string;
+  /** Base URL for KB source links; {url}/{external_parent_id}. Falls back to server default if empty. */
+  kb_source_base_url?: string | null;
   created_at?: string | null;
 };
 
@@ -78,6 +80,7 @@ export type AccountCreate = {
   corpus_id?: string | null;
   llm_config_id?: number | null;
   status?: string;
+  kb_source_base_url?: string | null;
 };
 
 export type AccountUpdate = {
@@ -86,6 +89,7 @@ export type AccountUpdate = {
   corpus_id?: string | null;
   llm_config_id?: number | null;
   status?: string;
+  kb_source_base_url?: string | null;
 };
 
 export type User = {
