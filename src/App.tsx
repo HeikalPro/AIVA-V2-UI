@@ -19,6 +19,7 @@ import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
+import { HttpLogsPage } from "@/pages/HttpLogsPage";
 
 export function App() {
   return (
@@ -71,6 +72,14 @@ export function App() {
               element={
                 <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.DEVELOPER]}>
                   <LLMConfigsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="http-logs"
+              element={
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DEVELOPER]}>
+                  <HttpLogsPage />
                 </ProtectedRoute>
               }
             />

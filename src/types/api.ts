@@ -387,3 +387,28 @@ export type LLMConfigUpdate = Partial<LLMConfigCreate>;
 export type MessageResponse = {
   message: string;
 };
+
+export type HttpRequestLog = {
+  id: number;
+  created_at?: string | null;
+  http_method: string;
+  path: string;
+  query_string?: string | null;
+  handler_name?: string | null;
+  route_template?: string | null;
+  status_code: number;
+  duration_ms: number;
+  user_id?: number | null;
+  user_email?: string | null;
+  org_id?: number | null;
+  user_roles?: string | null;
+  actor_label?: string | null;
+  client_ip?: string | null;
+  summary?: string | null;
+};
+
+export type HttpRequestLogList = {
+  items: HttpRequestLog[];
+  limit: number;
+  offset: number;
+};

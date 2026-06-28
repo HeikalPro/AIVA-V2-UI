@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  ScrollText,
   ThumbsUp,
   Ticket,
   Upload,
@@ -34,6 +35,7 @@ const ICONS: Record<string, LucideIcon> = {
   ThumbsUp,
   Upload,
   Bell,
+  ScrollText,
 };
 
 function NavItem({
