@@ -362,6 +362,7 @@ export type LLMConfig = {
   id: number;
   provider: string;
   model_name: string;
+  comment: string | null;
   api_base_url: string | null;
   temperature: number | null;
   max_tokens: number | null;
@@ -374,6 +375,7 @@ export type LLMConfig = {
 export type LLMConfigCreate = {
   provider: string;
   model_name: string;
+  comment?: string | null;
   api_base_url?: string | null;
   temperature?: number | null;
   max_tokens?: number | null;

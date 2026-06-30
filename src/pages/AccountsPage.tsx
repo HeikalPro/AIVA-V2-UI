@@ -314,7 +314,11 @@ export function AccountsPage() {
               <Label>LLM Config</Label>
               <Select value={form.llm_config_id} onChange={(e) => setForm({ ...form, llm_config_id: e.target.value })} className="mt-1">
                 <option value="">None</option>
-                {llmConfigs.map((c) => <option key={c.id} value={c.id}>{c.provider} / {c.model_name}</option>)}
+                {llmConfigs.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.provider} / {c.model_name}{c.comment ? ` — ${c.comment}` : ""}
+                  </option>
+                ))}
               </Select>
             </div>
             <div>

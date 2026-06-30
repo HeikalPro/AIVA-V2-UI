@@ -25,6 +25,7 @@ export function LLMConfigsPage() {
   const [form, setForm] = useState({
     provider: "openai",
     model_name: "",
+    comment: "",
     api_base_url: "",
     temperature: "0.7",
     max_tokens: "4096",
@@ -36,7 +37,7 @@ export function LLMConfigsPage() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ provider: "openai", model_name: "", api_base_url: "", temperature: "0.7", max_tokens: "4096", embedding_model: "", reranker_model: "", is_active: true });
+    setForm({ provider: "openai", model_name: "", comment: "", api_base_url: "", temperature: "0.7", max_tokens: "4096", embedding_model: "", reranker_model: "", is_active: true });
     setError(null);
     setDialogOpen(true);
   }
@@ -46,6 +47,7 @@ export function LLMConfigsPage() {
     setForm({
       provider: c.provider,
       model_name: c.model_name,
+      comment: c.comment ?? "",
       api_base_url: c.api_base_url ?? "",
       temperature: c.temperature != null ? String(c.temperature) : "",
       max_tokens: c.max_tokens != null ? String(c.max_tokens) : "",
@@ -62,6 +64,7 @@ export function LLMConfigsPage() {
     const body = {
       provider: form.provider,
       model_name: form.model_name,
+      comment: form.comment || null,
       api_base_url: form.api_base_url || null,
       temperature: form.temperature ? Number(form.temperature) : null,
       max_tokens: form.max_tokens ? Number(form.max_tokens) : null,
@@ -92,6 +95,7 @@ export function LLMConfigsPage() {
           { key: "id", header: "ID", sortable: true },
           { key: "provider", header: "Provider", sortable: true },
           { key: "model_name", header: "Model", sortable: true },
+          { key: "comment", header: "Comment", sortable: true, render: (r) => r.comment ?? "—" },
           { key: "temperature", header: "Temp", render: (r) => r.temperature ?? "—" },
           { key: "is_active", header: "Active", render: (r) => r.is_active ? <Badge variant="success">Yes</Badge> : <Badge variant="muted">No</Badge> },
           {
@@ -119,6 +123,7 @@ export function LLMConfigsPage() {
           <div className="space-y-4">
             <div><Label>Provider</Label><Input value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} className="mt-1" /></div>
             <div><Label>Model Name</Label><Input value={form.model_name} onChange={(e) => setForm({ ...form, model_name: e.target.value })} className="mt-1" /></div>
+            <div><Label>Comment</Label><Input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} placeholder="Short note about this model" className="mt-1" /></div>
             <div><Label>API Base URL</Label><Input value={form.api_base_url} onChange={(e) => setForm({ ...form, api_base_url: e.target.value })} className="mt-1" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Temperature</Label><Input value={form.temperature} onChange={(e) => setForm({ ...form, temperature: e.target.value })} className="mt-1" /></div>
