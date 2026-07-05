@@ -12,6 +12,7 @@ export type NavPermissionKey =
   | "organizations"
   | "accounts"
   | "users"
+  | "agents"
   | "roles"
   | "prompts"
   | "llm-configs"
@@ -58,6 +59,13 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "Users",
     permission: "users",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER],
+  },
+  {
+    path: "/agents",
+    label: "Agents",
+    icon: "UserCheck",
+    permission: "agents",
+    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR],
   },
   {
     path: "/roles",

@@ -3,10 +3,13 @@ import { Check, Download, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
+import { useAccounts } from "@/hooks/useAccounts";
 import { useDownloadRoleReportPdf, useNavPermissionCatalog, useRoles, useUpdateRoleNavPermissions } from "@/hooks/useRoles";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import type { RoleDefinition } from "@/types/api";
 
 function roleDisplayName(name: string): string {
@@ -22,8 +25,13 @@ function roleDisplayName(name: string): string {
 export function RolesPage() {
   const { user, refreshProfile } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
-  const canExportReport = isSuperAdmin;
-  const { data: roles = [], isLoading } = useRoles(true);
+  const canExportReport = isSuperAdmin || user?.roles.includes(ROLES.ORG_ADMIN);
+  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
+  const [accountId, setAccountId] = useState<number | null>(null);
+  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+  const { data: roles = [], isLoading } = useRoles(selectedAccountId, isSuperAdmin || canExportReport);
   const { data: catalog = [] } = useNavPermissionCatalog(isSuperAdmin);
   const updatePermissions = useUpdateRoleNavPermissions();
   const downloadReport = useDownloadRoleReportPdf();
@@ -59,11 +67,12 @@ export function RolesPage() {
   }
 
   async function handleSave() {
-    if (!selectedRole || !isSuperAdmin) return;
+    if (!selectedRole || !isSuperAdmin || selectedAccountId == null) return;
     setError(null);
     try {
       await updatePermissions.mutateAsync({
         roleId: selectedRole.id,
+        accountId: selectedAccountId,
         body: { nav_permissions: draft },
       });
       setSaved(true);
@@ -74,9 +83,13 @@ export function RolesPage() {
   }
 
   async function handleDownloadReport() {
+    if (selectedAccountId == null) return;
     setError(null);
     try {
-      await downloadReport.mutateAsync(undefined);
+      await downloadReport.mutateAsync({
+        organizationId: isSuperAdmin ? undefined : user?.organization_id,
+        accountId: selectedAccountId,
+      });
     } catch (e) {
       setError(formatUserError(e));
     }
@@ -90,10 +103,10 @@ export function RolesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Roles & access"
-        description="Set default pages per role. To give one specific user extra pages (e.g. Prompts for a single agent), use Users → Edit user → Individual access."
+        description="Configure page access per account — e.g. Hallan supervisors can differ from another account."
         icon={Shield}
         actions={
-          canExportReport ? (
+          canExportReport && selectedAccountId != null ? (
             <Button
               variant="outline"
               onClick={handleDownloadReport}
@@ -106,113 +119,138 @@ export function RolesPage() {
         }
       />
 
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[260px]">
+          <Label>Account</Label>
+          <Select
+            value={selectedAccountId != null ? String(selectedAccountId) : ""}
+            onChange={(e) => {
+              setAccountId(Number(e.target.value));
+              setSelectedId(null);
+            }}
+            className="mt-1"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
       <div className="rounded-xl border border-[#004080]/15 bg-[#004080]/5 px-4 py-3 text-sm text-slate-700">
-        <p className="font-medium text-[#004080]">Two levels of access</p>
+        <p className="font-medium text-[#004080]">
+          Account: {selectedAccount?.name ?? "—"}
+        </p>
         <ul className="mt-2 list-inside list-disc space-y-1 text-slate-600">
           <li>
-            <strong>Role</strong> (this page) — all users with that role, e.g. every Agent gets Chat.
+            <strong>Role on this account</strong> — e.g. Agent on Hallan gets Chat only here.
           </li>
           <li>
-            <strong>Individual user</strong> (Users → Edit) — one person only, e.g. 1 of 100 agents also gets
-            Prompts.
+            <strong>Individual user</strong> (Users → Edit) — extra pages for one person on top of their role.
           </li>
         </ul>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="rounded-xl border bg-white p-3 shadow-sm">
-          <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Roles</p>
-          {isLoading ? (
-            <p className="px-2 py-4 text-sm text-muted-foreground">Loading roles…</p>
-          ) : (
-            <ul className="space-y-1">
-              {roles.map((role: RoleDefinition) => {
-                const active = role.id === (selectedRole?.id ?? -1);
-                return (
-                  <li key={role.id}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(role.id)}
-                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
-                        active
-                          ? "bg-primary/10 font-semibold text-[#004080]"
-                          : "text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <span>{roleDisplayName(role.name)}</span>
-                      <Badge variant="muted" className="text-[10px] tabular-nums">
-                        {role.nav_permissions.length}
-                      </Badge>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </aside>
-
-        <section className="rounded-xl border bg-white p-5 shadow-sm">
-          {!selectedRole ? (
-            <p className="text-sm text-muted-foreground">Select a role to view page access.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">{roleDisplayName(selectedRole.name)}</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {selectedRole.name === ROLES.SUPER_ADMIN
-                      ? "Super Admin always has access to every page."
-                      : "Users with this role see only the checked pages in the menu."}
-                  </p>
-                </div>
-                {isSuperAdmin && selectedRole.name !== ROLES.SUPER_ADMIN && (
-                  <Button
-                    onClick={handleSave}
-                    disabled={!isDirty || updatePermissions.isPending}
-                  >
-                    {updatePermissions.isPending ? "Saving…" : "Save changes"}
-                  </Button>
-                )}
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {(catalog.length ? catalog : selectedRole.nav_permissions.map((key) => ({ key, label: key }))).map(
-                  (item) => {
-                    const checked = draft.includes(item.key);
-                    const locked = !isSuperAdmin || selectedRole.name === ROLES.SUPER_ADMIN;
-                    return (
-                      <label
-                        key={item.key}
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition-colors ${
-                          checked ? "border-[#004080]/30 bg-[#004080]/5" : "border-slate-200 bg-white hover:border-slate-300"
-                        } ${locked ? "cursor-default opacity-90" : ""}`}
+      {!selectedAccountId ? (
+        <p className="text-sm text-muted-foreground">Select an account to configure role access.</p>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+          <aside className="rounded-xl border bg-white p-3 shadow-sm">
+            <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Roles</p>
+            {isLoading ? (
+              <p className="px-2 py-4 text-sm text-muted-foreground">Loading roles…</p>
+            ) : (
+              <ul className="space-y-1">
+                {roles.map((role: RoleDefinition) => {
+                  const active = role.id === (selectedRole?.id ?? -1);
+                  return (
+                    <li key={role.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(role.id)}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                          active
+                            ? "bg-primary/10 font-semibold text-[#004080]"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}
                       >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#004080] focus:ring-[#004080]/30"
-                          checked={checked}
-                          disabled={locked}
-                          onChange={() => togglePermission(item.key)}
-                        />
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium text-slate-900">{item.label}</span>
-                          <span className="block text-xs text-slate-500">{item.key}</span>
-                        </span>
-                        {checked && <Check className="ml-auto h-4 w-4 shrink-0 text-[#004080]" />}
-                      </label>
-                    );
-                  },
-                )}
-              </div>
+                        <span>{roleDisplayName(role.name)}</span>
+                        <Badge variant="muted" className="text-[10px] tabular-nums">
+                          {role.nav_permissions.length}
+                        </Badge>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
 
-              {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-              {saved && !error && (
-                <p className="mt-4 text-sm text-emerald-700">Page access updated. Active sessions may need a refresh.</p>
-              )}
-            </>
-          )}
-        </section>
-      </div>
+          <section className="rounded-xl border bg-white p-5 shadow-sm">
+            {!selectedRole ? (
+              <p className="text-sm text-muted-foreground">Select a role to view page access.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">{roleDisplayName(selectedRole.name)}</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {selectedRole.name === ROLES.SUPER_ADMIN
+                        ? "Super Admin always has access to every page."
+                        : `Users with this role on ${selectedAccount?.name ?? "this account"} see only the checked pages.`}
+                    </p>
+                  </div>
+                  {isSuperAdmin && selectedRole.name !== ROLES.SUPER_ADMIN && (
+                    <Button
+                      onClick={handleSave}
+                      disabled={!isDirty || updatePermissions.isPending}
+                    >
+                      {updatePermissions.isPending ? "Saving…" : "Save changes"}
+                    </Button>
+                  )}
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {(catalog.length ? catalog : selectedRole.nav_permissions.map((key) => ({ key, label: key }))).map(
+                    (item) => {
+                      const checked = draft.includes(item.key);
+                      const locked = !isSuperAdmin || selectedRole.name === ROLES.SUPER_ADMIN;
+                      return (
+                        <label
+                          key={item.key}
+                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition-colors ${
+                            checked ? "border-[#004080]/30 bg-[#004080]/5" : "border-slate-200 bg-white hover:border-slate-300"
+                          } ${locked ? "cursor-default opacity-90" : ""}`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#004080] focus:ring-[#004080]/30"
+                            checked={checked}
+                            disabled={locked}
+                            onChange={() => togglePermission(item.key)}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-slate-900">{item.label}</span>
+                            <span className="block text-xs text-slate-500">{item.key}</span>
+                          </span>
+                          {checked && <Check className="ml-auto h-4 w-4 shrink-0 text-[#004080]" />}
+                        </label>
+                      );
+                    },
+                  )}
+                </div>
+
+                {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+                {saved && !error && (
+                  <p className="mt-4 text-sm text-emerald-700">Page access updated for this account.</p>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }

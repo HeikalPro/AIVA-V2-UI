@@ -119,6 +119,15 @@ export type UserCreate = {
   account_id?: number | null;
 };
 
+export type TraineeCreate = {
+  email: string;
+  password: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  account_id: number;
+  status?: string;
+};
+
 export type UserUpdate = {
   organization_id?: number;
   email?: string;

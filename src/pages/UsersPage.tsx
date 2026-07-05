@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Users, X, Download } from "lucide-react";
+import { Plus, Trash2, UserPlus, Users, X, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES } from "@/lib/roles";
+import { ROLES, canAccessPermission } from "@/lib/roles";
 import {
   useUsers,
   useCreateUser,
@@ -32,6 +32,7 @@ import { buildLoginEmail, parseLoginLocalPart } from "@/lib/login-email";
 import { useRoles, useDownloadRoleReportPdf } from "@/hooks/useRoles";
 import { RolePageAccessPreview } from "@/components/users/RolePageAccessPreview";
 import { UserExtraPageAccessEditor } from "@/components/users/UserExtraPageAccessEditor";
+import { TraineeDialog } from "@/components/agents/TraineeDialog";
 import type { User } from "@/types/api";
 
 function primaryRoleId(user: User, roleOptions: { id: number; name: string }[]): string {
@@ -58,6 +59,7 @@ export function UsersPage() {
   const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
   const canManagePageAccess = isSuperAdmin || isOrgAdmin;
   const canExportReport = isSuperAdmin || isOrgAdmin;
+  const canManageAgents = user ? canAccessPermission(user, "agents") : false;
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const { data = [], isLoading } = useUsers(isSuperAdmin ? null : user?.organization_id);
@@ -93,7 +95,19 @@ export function UsersPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
   const [roleFilter, setRoleFilter] = useState("ALL");
-  const { data: roleDefinitions = [] } = useRoles(canCreateUsers || isSuperAdmin);
+  const [traineeOpen, setTraineeOpen] = useState(false);
+
+  const createOrgId = !editing && form.organization_id ? Number(form.organization_id) : null;
+  const createAccounts = createOrgId
+    ? accounts.filter((a) => a.organization_id === createOrgId)
+    : accounts;
+  const rolesAccountId = editing
+    ? (editing.account_ids[0] ?? createAccounts[0]?.id ?? null)
+    : (form.account_id ? Number(form.account_id) : createAccounts[0]?.id ?? null);
+  const { data: roleDefinitions = [] } = useRoles(
+    rolesAccountId,
+    (canCreateUsers || isSuperAdmin) && rolesAccountId != null,
+  );
   const roleOptions = useMemo(
     () => roleDefinitions.map((r) => ({ id: r.id, name: r.name, nav_permissions: r.nav_permissions })),
     [roleDefinitions],
@@ -114,10 +128,6 @@ export function UsersPage() {
     return saved !== draft;
   }, [editing, extraNavPermissions]);
 
-  const createOrgId = !editing && form.organization_id ? Number(form.organization_id) : null;
-  const createAccounts = createOrgId
-    ? accounts.filter((a) => a.organization_id === createOrgId)
-    : accounts;
   const editOrgId = editing?.organization_id ?? null;
   const editAccounts = isSuperAdmin
     ? accounts
@@ -299,8 +309,9 @@ export function UsersPage() {
   async function handleDownloadReport() {
     setReportError(null);
     try {
-      const orgId = isSuperAdmin ? undefined : user?.organization_id;
-      await downloadReport.mutateAsync(orgId);
+      await downloadReport.mutateAsync({
+        organizationId: isSuperAdmin ? undefined : user?.organization_id,
+      });
     } catch (e) {
       setReportError(formatUserError(e));
     }
@@ -313,7 +324,7 @@ export function UsersPage() {
         title="Users"
         description="Manage platform users and roles"
         actions={
-          canCreateUsers || canExportReport ? (
+          canCreateUsers || canExportReport || canManageAgents ? (
             <div className="flex flex-wrap items-center gap-2">
               {canExportReport ? (
                 <Button
@@ -323,6 +334,11 @@ export function UsersPage() {
                 >
                   <Download className="mr-2 h-4 w-4" />
                   {downloadReport.isPending ? "Generating…" : "Download PDF report"}
+                </Button>
+              ) : null}
+              {canManageAgents ? (
+                <Button variant="outline" onClick={() => setTraineeOpen(true)}>
+                  <UserPlus className="mr-2 h-4 w-4" /> New Trainee
                 </Button>
               ) : null}
               {canCreateUsers ? (
@@ -453,6 +469,12 @@ export function UsersPage() {
         loading={isLoading}
         emptyMessage={data.length ? "No users match your search or filters" : "No users"}
         onRowClick={openEdit}
+      />
+
+      <TraineeDialog
+        open={traineeOpen}
+        onOpenChange={setTraineeOpen}
+        accounts={isSuperAdmin ? accounts : accounts.filter((a) => a.organization_id === user?.organization_id)}
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

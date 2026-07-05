@@ -14,6 +14,7 @@ import {
   ThumbsUp,
   Ticket,
   Upload,
+  UserCheck,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -36,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   Upload,
   Bell,
   Shield,
+  UserCheck,
 };
 
 function NavItem({
