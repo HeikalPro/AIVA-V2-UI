@@ -11,6 +11,7 @@ import {
   Menu,
   MessageSquare,
   ScrollText,
+  Shield,
   ThumbsUp,
   Ticket,
   Upload,
@@ -18,7 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { NAV_ITEMS, ROLES, canAccess, displayRole } from "@/lib/roles";
+import { NAV_ITEMS, ROLES, canAccessNav, displayRole } from "@/lib/roles";
 import { useIngestionPendingCount } from "@/hooks/useIngestion";
 import { useTicketOpenCount } from "@/hooks/useTickets";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   Upload,
   Bell,
   ScrollText,
+  Shield,
 };
 
 function NavItem({
@@ -115,7 +117,7 @@ export function Layout() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const navItems = NAV_ITEMS.filter((item) => user && canAccess(user.roles, item.roles));
+  const navItems = NAV_ITEMS.filter((item) => user && canAccessNav(user, item));
   const displayName =
     user?.first_name || user?.last_name
       ? [user.first_name, user.last_name].filter(Boolean).join(" ")

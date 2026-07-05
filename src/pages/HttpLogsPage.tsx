@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { RefreshCw, ScrollText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ROLES, canAccess } from "@/lib/roles";
+import { canAccessPermission } from "@/lib/roles";
 import { useHttpLogs } from "@/hooks/useHttpLogs";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -23,9 +23,7 @@ function statusClass(code: number): string {
 
 export function HttpLogsPage() {
   const { user } = useAuth();
-  const allowed =
-    user != null &&
-    canAccess(user.roles, [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DEVELOPER]);
+  const allowed = user != null && canAccessPermission(user, "http-logs");
 
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState("ALL");

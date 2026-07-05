@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Plus, Ticket as TicketIcon, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES } from "@/lib/roles";
+import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import { useTickets, useTicketOpenCount, useCreateTicket, useUpdateTicket, useDeleteTicket } from "@/hooks/useTickets";
@@ -22,13 +22,7 @@ import type { DeveloperNotify, Ticket } from "@/types/api";
 export function TicketsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
-  const canSubmitTickets =
-    !!user &&
-    (user.roles.includes(ROLES.SUPER_ADMIN) ||
-      user.roles.includes(ROLES.ORG_ADMIN) ||
-      user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
-      user.roles.includes(ROLES.SUPERVISOR) ||
-      user.roles.includes(ROLES.DEVELOPER));
+  const canSubmitTickets = user != null && canAccessPermission(user, "tickets");
   const { data: openBadge } = useTicketOpenCount(isSuperAdmin ?? false);
   const openForSuperAdmin = openBadge?.open_count ?? 0;
   const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);

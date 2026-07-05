@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Eye, Plus, Upload } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES } from "@/lib/roles";
+import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import {
@@ -49,12 +49,7 @@ export function IngestionPage() {
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const isDeveloper = user?.roles.includes(ROLES.DEVELOPER);
   const canManageIngestion = isSuperAdmin || isDeveloper;
-  const canCreateRequest =
-    !!user &&
-    (user.roles.includes(ROLES.SUPER_ADMIN) ||
-      user.roles.includes(ROLES.ORG_ADMIN) ||
-      user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
-      user.roles.includes(ROLES.SUPERVISOR));
+  const canCreateRequest = user != null && canAccessPermission(user, "ingestion");
 
   const { data: pendingBadge } = useIngestionPendingCount(isSuperAdmin ?? false);
   const pendingCount = pendingBadge?.pending_count ?? 0;

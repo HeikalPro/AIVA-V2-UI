@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Bell, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES } from "@/lib/roles";
+import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import {
@@ -27,12 +27,7 @@ import type { AccountAnnouncement } from "@/types/api";
 export function AccountUpdatesPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
-  const canManage =
-    !!user &&
-    (user.roles.includes(ROLES.SUPER_ADMIN) ||
-      user.roles.includes(ROLES.ORG_ADMIN) ||
-      user.roles.includes(ROLES.ACCOUNT_MANAGER) ||
-      user.roles.includes(ROLES.SUPERVISOR));
+  const canManage = user != null && canAccessPermission(user, "account-updates");
 
   const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);

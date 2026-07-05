@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/shared/Layout";
 import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
-import { ROLES } from "@/lib/roles";
+import { NAV_ITEMS } from "@/lib/roles";
 import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
 import { VerifyEmailPage } from "@/pages/VerifyEmailPage";
@@ -12,6 +13,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { OrganizationsPage } from "@/pages/OrganizationsPage";
 import { AccountsPage } from "@/pages/AccountsPage";
 import { UsersPage } from "@/pages/UsersPage";
+import { RolesPage } from "@/pages/RolesPage";
 import { PromptsPage } from "@/pages/PromptsPage";
 import { LLMConfigsPage } from "@/pages/LLMConfigsPage";
 import { ChatPage } from "@/pages/ChatPage";
@@ -20,6 +22,22 @@ import { IngestionPage } from "@/pages/IngestionPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
 import { HttpLogsPage } from "@/pages/HttpLogsPage";
+
+const ROUTE_PAGES: Record<string, ReactNode> = {
+  "/": <DashboardPage />,
+  "/organizations": <OrganizationsPage />,
+  "/accounts": <AccountsPage />,
+  "/users": <UsersPage />,
+  "/roles": <RolesPage />,
+  "/prompts": <PromptsPage />,
+  "/llm-configs": <LLMConfigsPage />,
+  "/http-logs": <HttpLogsPage />,
+  "/message-ratings": <MessageRatingsPage />,
+  "/account-updates": <AccountUpdatesPage />,
+  "/chat": <ChatPage />,
+  "/tickets": <TicketsPage />,
+  "/ingestion": <IngestionPage />,
+};
 
 export function App() {
   return (
@@ -34,95 +52,17 @@ export function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
-            <Route index element={<DashboardPage />} />
-            <Route
-              path="organizations"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
-                  <OrganizationsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="accounts"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER]}>
-                  <AccountsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="users"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER]}>
-                  <UsersPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="prompts"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.DEVELOPER]}>
-                  <PromptsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="llm-configs"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.DEVELOPER]}>
-                  <LLMConfigsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="http-logs"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DEVELOPER]}>
-                  <HttpLogsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="message-ratings"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
-                  <MessageRatingsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="account-updates"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR]}>
-                  <AccountUpdatesPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="chat"
-              element={
-                <ProtectedRoute roles={[ROLES.AGENT, ROLES.SUPERVISOR]}>
-                  <ChatPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="tickets"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
-                  <TicketsPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="ingestion"
-              element={
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER]}>
-                  <IngestionPage />
-                </ProtectedRoute>
-              }
-            />
+            {NAV_ITEMS.map((item) => {
+              const path = item.path === "/" ? undefined : item.path.slice(1);
+              const element = (
+                <ProtectedRoute permission={item.permission}>{ROUTE_PAGES[item.path]}</ProtectedRoute>
+              );
+              return path ? (
+                <Route key={item.path} path={path} element={element} />
+              ) : (
+                <Route key={item.path} index element={element} />
+              );
+            })}
           </Route>
         </Route>
 

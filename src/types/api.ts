@@ -11,6 +11,7 @@ export type UserProfile = {
   first_name: string | null;
   last_name: string | null;
   roles: string[];
+  permissions?: string[];
 };
 
 export type Organization = {
@@ -103,6 +104,7 @@ export type User = {
   status: string;
   roles: string[];
   account_ids: number[];
+  extra_nav_permissions?: string[];
   created_at?: string | null;
 };
 
@@ -130,6 +132,25 @@ export type UserUpdate = {
 export type UserRoleAssign = {
   role_id: number;
   account_id?: number | null;
+};
+
+export type UserNavPermissionsUpdate = {
+  extra_nav_permissions: string[];
+};
+
+export type RoleDefinition = {
+  id: number;
+  name: string;
+  nav_permissions: string[];
+};
+
+export type NavPermissionCatalogItem = {
+  key: string;
+  label: string;
+};
+
+export type RoleNavPermissionsUpdate = {
+  nav_permissions: string[];
 };
 
 export type AccountUserAssign = {

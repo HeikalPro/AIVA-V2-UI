@@ -11,6 +11,7 @@ import {
   useAssignAccount,
   useUnassignAccount,
   useSetUserRole,
+  useSetUserNavPermissions,
 } from "@/hooks/useUsers";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -28,22 +29,24 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { buildLoginEmail, parseLoginLocalPart } from "@/lib/login-email";
+import { useRoles } from "@/hooks/useRoles";
+import { RolePageAccessPreview } from "@/components/users/RolePageAccessPreview";
+import { UserExtraPageAccessEditor } from "@/components/users/UserExtraPageAccessEditor";
 import type { User } from "@/types/api";
 
-const ROLE_OPTIONS = [
-  { id: 1, name: "SUPER_ADMIN" },
-  { id: 2, name: "ORGANIZATION_ADMIN" },
-  { id: 3, name: "ACCOUNT_MANAGER" },
-  { id: 4, name: "SUPERVISOR" },
-  { id: 5, name: "AGENT" },
-  { id: 6, name: "DEVELOPER" },
-];
-
-function primaryRoleId(user: User): string {
+function primaryRoleId(user: User, roleOptions: { id: number; name: string }[]): string {
   const primaryName = user.roles[0];
-  const match = ROLE_OPTIONS.find((r) => r.name === primaryName);
-  return String(match?.id ?? "5");
+  const match = roleOptions.find((r) => r.name === primaryName);
+  const agent = roleOptions.find((r) => r.name === "AGENT");
+  return String(match?.id ?? agent?.id ?? roleOptions[0]?.id ?? "");
 }
+
+function defaultAgentRoleId(roleOptions: { id: number; name: string }[]): string {
+  const agent = roleOptions.find((r) => r.name === "AGENT");
+  return String(agent?.id ?? roleOptions[0]?.id ?? "");
+}
+
+const ORG_ADMIN_RESTRICTED_NAV = ["organizations", "roles", "message-ratings", "llm-configs"];
 
 export function UsersPage() {
   const { user } = useAuth();
@@ -53,6 +56,7 @@ export function UsersPage() {
   const canCreateUsers = isSuperAdmin || isOrgAdmin;
   const canDeleteUsers = isSuperAdmin || isOrgAdmin;
   const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
+  const canManagePageAccess = isSuperAdmin || isOrgAdmin;
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const { data = [], isLoading } = useUsers(isSuperAdmin ? null : user?.organization_id);
@@ -62,6 +66,7 @@ export function UsersPage() {
   const assignAccount = useAssignAccount();
   const unassignAccount = useUnassignAccount();
   const setUserRole = useSetUserRole();
+  const setUserNavPermissions = useSetUserNavPermissions();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -76,14 +81,35 @@ export function UsersPage() {
     first_name: "",
     last_name: "",
     status: "ACTIVE",
-    role_id: "5",
+    role_id: "",
     account_id: "",
   });
+  const [extraNavPermissions, setExtraNavPermissions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
   const [roleFilter, setRoleFilter] = useState("ALL");
+  const { data: roleDefinitions = [] } = useRoles(canCreateUsers || isSuperAdmin);
+  const roleOptions = useMemo(
+    () => roleDefinitions.map((r) => ({ id: r.id, name: r.name, nav_permissions: r.nav_permissions })),
+    [roleDefinitions],
+  );
+  const selectedRolePreview = useMemo(
+    () => roleOptions.find((r) => String(r.id) === form.role_id),
+    [roleOptions, form.role_id],
+  );
+  const editingRolePreview = useMemo(() => {
+    if (!editing) return selectedRolePreview;
+    const roleName = editing.roles[0];
+    return roleOptions.find((r) => r.name === roleName) ?? selectedRolePreview;
+  }, [editing, roleOptions, selectedRolePreview]);
+  const extrasDirty = useMemo(() => {
+    if (!editing) return false;
+    const saved = [...(editing.extra_nav_permissions ?? [])].sort().join(",");
+    const draft = [...extraNavPermissions].sort().join(",");
+    return saved !== draft;
+  }, [editing, extraNavPermissions]);
 
   const createOrgId = !editing && form.organization_id ? Number(form.organization_id) : null;
   const createAccounts = createOrgId
@@ -122,9 +148,10 @@ export function UsersPage() {
       first_name: "",
       last_name: "",
       status: "ACTIVE",
-      role_id: "5",
+      role_id: defaultAgentRoleId(roleOptions),
       account_id: "",
     });
+    setExtraNavPermissions([]);
     setError(null);
     setAddAccountId("");
     setDialogOpen(true);
@@ -132,6 +159,7 @@ export function UsersPage() {
 
   function openEdit(u: User) {
     setEditing(u);
+    setExtraNavPermissions(u.extra_nav_permissions ?? []);
     setForm({
       organization_id: String(u.organization_id),
       emailLocal: parseLoginLocalPart(u.email),
@@ -139,7 +167,7 @@ export function UsersPage() {
       first_name: u.first_name ?? "",
       last_name: u.last_name ?? "",
       status: u.status,
-      role_id: primaryRoleId(u),
+      role_id: primaryRoleId(u, roleOptions),
       account_id: "",
     });
     setError(null);
@@ -228,12 +256,26 @@ export function UsersPage() {
         });
         setEditing(updated);
         if (isSuperAdmin) {
-          await setUserRole.mutateAsync({
+          const roleId = Number(form.role_id || defaultAgentRoleId(roleOptions));
+          if (roleId) {
+            await setUserRole.mutateAsync({
+              userId: editing.id,
+              body: { role_id: roleId },
+            });
+          }
+        }
+        if (canManagePageAccess && extrasDirty) {
+          await setUserNavPermissions.mutateAsync({
             userId: editing.id,
-            body: { role_id: Number(form.role_id) },
+            body: { extra_nav_permissions: extraNavPermissions },
           });
         }
       } else {
+        const roleId = Number(form.role_id || defaultAgentRoleId(roleOptions));
+        if (!roleId) {
+          setError("Select a role for the new user.");
+          return;
+        }
         await createUser.mutateAsync({
           organization_id: Number(form.organization_id),
           email,
@@ -241,7 +283,7 @@ export function UsersPage() {
           first_name: form.first_name || null,
           last_name: form.last_name || null,
           status: form.status,
-          role_id: Number(form.role_id),
+          role_id: roleId,
           account_id: form.account_id ? Number(form.account_id) : null,
         });
       }
@@ -292,7 +334,7 @@ export function UsersPage() {
             onChange: setRoleFilter,
             options: [
               { value: "ALL", label: "All roles" },
-              ...ROLE_OPTIONS.map((r) => ({ value: r.name, label: r.name })),
+              ...roleOptions.map((r) => ({ value: r.name, label: r.name })),
             ],
           },
           {
@@ -385,7 +427,7 @@ export function UsersPage() {
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editing ? "Edit User" : "New User"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             {isSuperAdmin && (
@@ -420,18 +462,42 @@ export function UsersPage() {
               <div><Label>First Name</Label><Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} className="mt-1" /></div>
               <div><Label>Last Name</Label><Input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} className="mt-1" /></div>
             </div>
+            {editing && !isSuperAdmin && editing.roles[0] && (
+              <div>
+                <Label>Role</Label>
+                <p className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">
+                  {editing.roles[0]}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Role is managed by Super Admin. You can still grant extra pages to this user below.
+                </p>
+              </div>
+            )}
             {(!editing || isSuperAdmin) && (
               <div>
                 <Label>Role</Label>
                 <Select value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })} className="mt-1">
-                  {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  {roleOptions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </Select>
+                {selectedRolePreview && !editing && (
+                  <div className="mt-3">
+                    <RolePageAccessPreview navPermissions={selectedRolePreview.nav_permissions} compact />
+                  </div>
+                )}
                 {editing && isSuperAdmin && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     Replaces the user&apos;s current role. Account access below is unchanged.
                   </p>
                 )}
               </div>
+            )}
+            {editing && canManagePageAccess && editingRolePreview && !editing.roles.includes(ROLES.SUPER_ADMIN) && (
+              <UserExtraPageAccessEditor
+                roleNavPermissions={editingRolePreview.nav_permissions}
+                extraNavPermissions={extraNavPermissions}
+                onExtraChange={setExtraNavPermissions}
+                restrictedKeys={isSuperAdmin ? [] : ORG_ADMIN_RESTRICTED_NAV}
+              />
             )}
             {!editing && (
               <div>
@@ -511,7 +577,7 @@ export function UsersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={handleSave}
-              disabled={createUser.isPending || updateUser.isPending || setUserRole.isPending}
+              disabled={createUser.isPending || updateUser.isPending || setUserRole.isPending || setUserNavPermissions.isPending}
             >
               {editing ? "Save" : "Create"}
             </Button>

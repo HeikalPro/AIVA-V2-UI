@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, Clock, DollarSign, LayoutDashboard, MessageSquare, Users, Zap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ROLES, canAccess } from "@/lib/roles";
+import { ROLES, canAccess, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useAgentMetrics, useDashboardStats } from "@/hooks/useAnalytics";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -13,7 +13,6 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import type { AgentMetric } from "@/types/api";
 
-const DASHBOARD_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER];
 const ANALYTICS_VIEW_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR];
 
 function agentDisplayName(metric: AgentMetric): string {
@@ -24,8 +23,11 @@ function agentDisplayName(metric: AgentMetric): string {
 export function DashboardPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
-  const canViewDashboard = canAccess(user?.roles ?? [], DASHBOARD_ROLES);
-  const canViewAnalytics = canAccess(user?.roles ?? [], ANALYTICS_VIEW_ROLES);
+  const canViewDashboard = user ? canAccessPermission(user, "dashboard") : false;
+  const canViewAnalytics =
+    user != null &&
+    (canAccessPermission(user, "dashboard") ||
+      canAccess(user.roles, ANALYTICS_VIEW_ROLES));
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api-client";
-import type { AccountUserAssign, User, UserCreate, UserRoleAssign, UserUpdate } from "@/types/api";
+import type { AccountUserAssign, User, UserCreate, UserNavPermissionsUpdate, UserRoleAssign, UserUpdate } from "@/types/api";
 
 export function useUsers(organizationId?: number | null) {
   const params = organizationId ? `?organization_id=${organizationId}` : "";
@@ -72,6 +72,17 @@ export function useUnassignAccount() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users"] });
       qc.invalidateQueries({ queryKey: ["account-users"] });
+    },
+  });
+}
+
+export function useSetUserNavPermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, body }: { userId: number; body: UserNavPermissionsUpdate }) =>
+      apiPut<User>(`/api/users/${userId}/nav-permissions`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
     },
   });
 }
