@@ -10,7 +10,6 @@ import {
   LogOut,
   Menu,
   MessageSquare,
-  ScrollText,
   Shield,
   ThumbsUp,
   Ticket,
@@ -36,7 +35,6 @@ const ICONS: Record<string, LucideIcon> = {
   ThumbsUp,
   Upload,
   Bell,
-  ScrollText,
   Shield,
 };
 

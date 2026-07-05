@@ -132,6 +132,48 @@ export function apiDelete<T>(path: string, auth = true) {
   return request<T>("DELETE", path, undefined, { auth });
 }
 
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl()}${path}`, { headers });
+  } catch (err) {
+    wrapFetchError(err);
+  }
+
+  if (res.status === 401) {
+    const ok = await tryRefresh();
+    if (!ok) {
+      clearTokens();
+      throw new ApiError(formatUserError(new Error("Session expired"), "api"), 401);
+    }
+    const nextToken = getAccessToken();
+    if (nextToken) headers.Authorization = `Bearer ${nextToken}`;
+    try {
+      res = await fetch(`${baseUrl()}${path}`, { headers });
+    } catch (err) {
+      wrapFetchError(err);
+    }
+  }
+
+  if (!res.ok) {
+    throw new ApiError(await readHttpErrorMessage(res), res.status);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 const backendUrl = () => import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 export function startZohoLogin() {

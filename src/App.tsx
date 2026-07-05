@@ -21,7 +21,6 @@ import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
-import { HttpLogsPage } from "@/pages/HttpLogsPage";
 
 const ROUTE_PAGES: Record<string, ReactNode> = {
   "/": <DashboardPage />,
@@ -31,7 +30,6 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/roles": <RolesPage />,
   "/prompts": <PromptsPage />,
   "/llm-configs": <LLMConfigsPage />,
-  "/http-logs": <HttpLogsPage />,
   "/message-ratings": <MessageRatingsPage />,
   "/account-updates": <AccountUpdatesPage />,
   "/chat": <ChatPage />,

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Shield } from "lucide-react";
+import { Check, Download, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
-import { useNavPermissionCatalog, useRoles, useUpdateRoleNavPermissions } from "@/hooks/useRoles";
+import { useDownloadRoleReportPdf, useNavPermissionCatalog, useRoles, useUpdateRoleNavPermissions } from "@/hooks/useRoles";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,9 +22,12 @@ function roleDisplayName(name: string): string {
 export function RolesPage() {
   const { user, refreshProfile } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
+  const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN) ?? false;
+  const canExportReport = isSuperAdmin || isOrgAdmin;
   const { data: roles = [], isLoading } = useRoles(true);
   const { data: catalog = [] } = useNavPermissionCatalog(isSuperAdmin);
   const updatePermissions = useUpdateRoleNavPermissions();
+  const downloadReport = useDownloadRoleReportPdf();
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
@@ -71,6 +74,16 @@ export function RolesPage() {
     }
   }
 
+  async function handleDownloadReport() {
+    setError(null);
+    try {
+      const orgId = isSuperAdmin ? undefined : user?.organization_id;
+      await downloadReport.mutateAsync(orgId);
+    } catch (e) {
+      setError(formatUserError(e));
+    }
+  }
+
   const isDirty =
     selectedRole != null &&
     [...draft].sort().join(",") !== [...selectedRole.nav_permissions].sort().join(",");
@@ -81,6 +94,18 @@ export function RolesPage() {
         title="Roles & access"
         description="Set default pages per role. To give one specific user extra pages (e.g. Prompts for a single agent), use Users → Edit user → Individual access."
         icon={Shield}
+        actions={
+          canExportReport ? (
+            <Button
+              variant="outline"
+              onClick={handleDownloadReport}
+              disabled={downloadReport.isPending}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              {downloadReport.isPending ? "Generating…" : "Download PDF report"}
+            </Button>
+          ) : undefined
+        }
       />
 
       <div className="rounded-xl border border-[#004080]/15 bg-[#004080]/5 px-4 py-3 text-sm text-slate-700">

@@ -15,7 +15,6 @@ export type NavPermissionKey =
   | "roles"
   | "prompts"
   | "llm-configs"
-  | "http-logs"
   | "message-ratings"
   | "account-updates"
   | "chat"
@@ -80,13 +79,6 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "Cpu",
     permission: "llm-configs",
     roles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
-  },
-  {
-    path: "/http-logs",
-    label: "API activity",
-    icon: "ScrollText",
-    permission: "http-logs",
-    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DEVELOPER],
   },
   {
     path: "/message-ratings",

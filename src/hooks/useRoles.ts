@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPut } from "@/lib/api-client";
+import { apiDownload, apiGet, apiPut } from "@/lib/api-client";
 import type { NavPermissionCatalogItem, RoleDefinition, RoleNavPermissionsUpdate } from "@/types/api";
 
 export function useRoles(enabled = true) {
@@ -25,6 +25,16 @@ export function useUpdateRoleNavPermissions() {
       apiPut<RoleDefinition>(`/api/roles/${roleId}/nav-permissions`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["roles"] });
+    },
+  });
+}
+
+export function useDownloadRoleReportPdf() {
+  return useMutation({
+    mutationFn: async (organizationId?: number | null) => {
+      const query = organizationId != null ? `?organization_id=${organizationId}` : "";
+      const stamp = new Date().toISOString().slice(0, 10);
+      await apiDownload(`/api/roles/reports/pdf${query}`, `gochat247-role-report-${stamp}.pdf`);
     },
   });
 }
