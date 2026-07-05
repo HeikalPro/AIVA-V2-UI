@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Users, X } from "lucide-react";
+import { Plus, Trash2, Users, X, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
 import { ROLES } from "@/lib/roles";
@@ -29,7 +29,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { buildLoginEmail, parseLoginLocalPart } from "@/lib/login-email";
-import { useRoles } from "@/hooks/useRoles";
+import { useRoles, useDownloadRoleReportPdf } from "@/hooks/useRoles";
 import { RolePageAccessPreview } from "@/components/users/RolePageAccessPreview";
 import { UserExtraPageAccessEditor } from "@/components/users/UserExtraPageAccessEditor";
 import type { User } from "@/types/api";
@@ -57,6 +57,7 @@ export function UsersPage() {
   const canDeleteUsers = isSuperAdmin || isOrgAdmin;
   const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
   const canManagePageAccess = isSuperAdmin || isOrgAdmin;
+  const canExportReport = isSuperAdmin || isOrgAdmin;
   const { data: orgs = [] } = useOrganizations(isSuperAdmin);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const { data = [], isLoading } = useUsers(isSuperAdmin ? null : user?.organization_id);
@@ -67,6 +68,7 @@ export function UsersPage() {
   const unassignAccount = useUnassignAccount();
   const setUserRole = useSetUserRole();
   const setUserNavPermissions = useSetUserNavPermissions();
+  const downloadReport = useDownloadRoleReportPdf();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -86,6 +88,7 @@ export function UsersPage() {
   });
   const [extraNavPermissions, setExtraNavPermissions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
@@ -293,6 +296,16 @@ export function UsersPage() {
     }
   }
 
+  async function handleDownloadReport() {
+    setReportError(null);
+    try {
+      const orgId = isSuperAdmin ? undefined : user?.organization_id;
+      await downloadReport.mutateAsync(orgId);
+    } catch (e) {
+      setReportError(formatUserError(e));
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -300,13 +313,29 @@ export function UsersPage() {
         title="Users"
         description="Manage platform users and roles"
         actions={
-          canCreateUsers ? (
-            <Button onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> New User
-            </Button>
+          canCreateUsers || canExportReport ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {canExportReport ? (
+                <Button
+                  variant="outline"
+                  onClick={handleDownloadReport}
+                  disabled={downloadReport.isPending}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {downloadReport.isPending ? "Generating…" : "Download PDF report"}
+                </Button>
+              ) : null}
+              {canCreateUsers ? (
+                <Button onClick={openCreate}>
+                  <Plus className="mr-2 h-4 w-4" /> New User
+                </Button>
+              ) : null}
+            </div>
           ) : undefined
         }
       />
+
+      {reportError ? <p className="text-sm text-red-600">{reportError}</p> : null}
 
       <TableFilters
         search={search}

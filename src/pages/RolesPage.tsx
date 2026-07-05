@@ -22,8 +22,7 @@ function roleDisplayName(name: string): string {
 export function RolesPage() {
   const { user, refreshProfile } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
-  const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN) ?? false;
-  const canExportReport = isSuperAdmin || isOrgAdmin;
+  const canExportReport = isSuperAdmin;
   const { data: roles = [], isLoading } = useRoles(true);
   const { data: catalog = [] } = useNavPermissionCatalog(isSuperAdmin);
   const updatePermissions = useUpdateRoleNavPermissions();
@@ -77,8 +76,7 @@ export function RolesPage() {
   async function handleDownloadReport() {
     setError(null);
     try {
-      const orgId = isSuperAdmin ? undefined : user?.organization_id;
-      await downloadReport.mutateAsync(orgId);
+      await downloadReport.mutateAsync(undefined);
     } catch (e) {
       setError(formatUserError(e));
     }
