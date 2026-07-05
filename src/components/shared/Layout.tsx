@@ -14,6 +14,7 @@ import {
   ThumbsUp,
   Ticket,
   Upload,
+  ScrollText,
   UserCheck,
   Users,
   type LucideIcon,
@@ -37,6 +38,7 @@ const ICONS: Record<string, LucideIcon> = {
   Upload,
   Bell,
   Shield,
+  ScrollText,
   UserCheck,
 };
 

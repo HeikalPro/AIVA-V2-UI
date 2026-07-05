@@ -420,6 +420,45 @@ export type MessageResponse = {
   message: string;
 };
 
+export type AuditLog = {
+  id: number;
+  created_at: string | null;
+  user_id: number | null;
+  actor_email: string | null;
+  actor_org_id: number | null;
+  entity_type: string;
+  entity_id: string;
+  action_type: string;
+  old_value: string | null;
+  new_value: string | null;
+  ip_address: string | null;
+  summary: string | null;
+};
+
+export type AuditLogList = {
+  items: AuditLog[];
+  limit: number;
+  offset: number;
+};
+
+export type SignInLog = {
+  id: number;
+  created_at: string | null;
+  user_id: number | null;
+  user_email: string | null;
+  event_type: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  metadata: string | null;
+  summary: string | null;
+};
+
+export type SignInLogList = {
+  items: SignInLog[];
+  limit: number;
+  offset: number;
+};
+
 export type HttpRequestLog = {
   id: number;
   created_at?: string | null;

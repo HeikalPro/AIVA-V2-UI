@@ -20,6 +20,7 @@ import { AgentsPage } from "@/pages/AgentsPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
+import { LogsPage } from "@/pages/LogsPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
 
@@ -37,6 +38,7 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/chat": <ChatPage />,
   "/tickets": <TicketsPage />,
   "/ingestion": <IngestionPage />,
+  "/logs": <LogsPage />,
 };
 
 export function App() {

@@ -20,7 +20,8 @@ export type NavPermissionKey =
   | "account-updates"
   | "chat"
   | "tickets"
-  | "ingestion";
+  | "ingestion"
+  | "logs";
 
 export type NavItem = {
   path: string;
@@ -115,6 +116,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Ingestion",
     icon: "Upload",
     permission: "ingestion",
+    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
+  },
+  {
+    path: "/logs",
+    label: "Logs",
+    icon: "ScrollText",
+    permission: "logs",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
   },
 ];
