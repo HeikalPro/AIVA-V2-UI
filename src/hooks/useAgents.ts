@@ -21,3 +21,15 @@ export function useCreateTrainee() {
     },
   });
 }
+
+export function usePromoteTrainee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, accountId }: { userId: number; accountId: number }) =>
+      apiPost<User>(`/api/agents/${userId}/promote?account_id=${accountId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}

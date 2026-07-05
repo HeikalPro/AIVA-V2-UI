@@ -132,6 +132,13 @@ export type AccessUser = {
   permissions?: string[];
 };
 
+export function getDefaultNavPermissionsForRole(roleName: string): NavPermissionKey[] {
+  if (roleName === ROLES.SUPER_ADMIN) {
+    return NAV_ITEMS.map((item) => item.permission);
+  }
+  return NAV_ITEMS.filter((item) => item.roles.includes(roleName)).map((item) => item.permission);
+}
+
 export function canAccess(roles: string[], required: string[]): boolean {
   if (required.length === 0) return true;
   if (roles.includes(ROLES.SUPER_ADMIN)) return true;

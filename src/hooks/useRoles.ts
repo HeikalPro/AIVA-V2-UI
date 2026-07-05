@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDownload, apiGet, apiPut } from "@/lib/api-client";
+import { apiDownload, apiGet, apiPost, apiPut } from "@/lib/api-client";
 import type { NavPermissionCatalogItem, RoleDefinition, RoleNavPermissionsUpdate } from "@/types/api";
 
 export function useRoles(accountId?: number | null, enabled = true) {
@@ -31,6 +31,17 @@ export function useUpdateRoleNavPermissions() {
       accountId: number;
       body: RoleNavPermissionsUpdate;
     }) => apiPut<RoleDefinition>(`/api/roles/${roleId}/nav-permissions?account_id=${accountId}`, body),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["roles", variables.accountId] });
+    },
+  });
+}
+
+export function useResetRoleNavPermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roleId, accountId }: { roleId: number; accountId: number }) =>
+      apiPost<RoleDefinition>(`/api/roles/${roleId}/nav-permissions/reset?account_id=${accountId}`),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["roles", variables.accountId] });
     },

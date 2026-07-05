@@ -106,6 +106,7 @@ export type User = {
   account_ids: number[];
   extra_nav_permissions?: string[];
   created_at?: string | null;
+  is_trainee?: boolean;
 };
 
 export type UserCreate = {

@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Download, Shield } from "lucide-react";
+import { Check, Download, RotateCcw, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES } from "@/lib/roles";
+import { getDefaultNavPermissionsForRole, ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useDownloadRoleReportPdf, useNavPermissionCatalog, useRoles, useUpdateRoleNavPermissions } from "@/hooks/useRoles";
+import {
+  useDownloadRoleReportPdf,
+  useNavPermissionCatalog,
+  useResetRoleNavPermissions,
+  useRoles,
+  useUpdateRoleNavPermissions,
+} from "@/hooks/useRoles";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,12 +40,13 @@ export function RolesPage() {
   const { data: roles = [], isLoading } = useRoles(selectedAccountId, isSuperAdmin || canExportReport);
   const { data: catalog = [] } = useNavPermissionCatalog(isSuperAdmin);
   const updatePermissions = useUpdateRoleNavPermissions();
+  const resetPermissions = useResetRoleNavPermissions();
   const downloadReport = useDownloadRoleReportPdf();
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const selectedRole = useMemo(
     () => roles.find((r) => r.id === selectedId) ?? roles[0] ?? null,
@@ -55,7 +62,7 @@ export function RolesPage() {
   useEffect(() => {
     if (selectedRole) {
       setDraft(selectedRole.nav_permissions);
-      setSaved(false);
+      setSuccessMessage(null);
       setError(null);
     }
   }, [selectedRole?.id, selectedRole?.nav_permissions.join(",")]);
@@ -63,7 +70,7 @@ export function RolesPage() {
   function togglePermission(key: string) {
     if (!isSuperAdmin || selectedRole?.name === ROLES.SUPER_ADMIN) return;
     setDraft((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-    setSaved(false);
+    setSuccessMessage(null);
   }
 
   async function handleSave() {
@@ -75,7 +82,7 @@ export function RolesPage() {
         accountId: selectedAccountId,
         body: { nav_permissions: draft },
       });
-      setSaved(true);
+      setSuccessMessage("Page access updated for this account.");
       await refreshProfile();
     } catch (e) {
       setError(formatUserError(e));
@@ -90,6 +97,36 @@ export function RolesPage() {
         organizationId: isSuperAdmin ? undefined : user?.organization_id,
         accountId: selectedAccountId,
       });
+    } catch (e) {
+      setError(formatUserError(e));
+    }
+  }
+
+  function permissionsMatch(a: string[], b: string[]) {
+    return [...a].sort().join(",") === [...b].sort().join(",");
+  }
+
+  function isRoleAtDefault(role: RoleDefinition) {
+    return permissionsMatch(role.nav_permissions, getDefaultNavPermissionsForRole(role.name));
+  }
+
+  async function handleReset(role: RoleDefinition) {
+    if (!isSuperAdmin || selectedAccountId == null || role.name === ROLES.SUPER_ADMIN) return;
+    const accountName = selectedAccount?.name ?? "this account";
+    const confirmed = window.confirm(
+      `Reset "${roleDisplayName(role.name)}" on ${accountName} to its default page access?`,
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setSuccessMessage(null);
+    try {
+      await resetPermissions.mutateAsync({ roleId: role.id, accountId: selectedAccountId });
+      if (role.id === selectedRole?.id) {
+        setDraft(getDefaultNavPermissionsForRole(role.name));
+      }
+      setSuccessMessage(`"${roleDisplayName(role.name)}" reset to default page access.`);
+      await refreshProfile();
     } catch (e) {
       setError(formatUserError(e));
     }
@@ -165,22 +202,36 @@ export function RolesPage() {
               <ul className="space-y-1">
                 {roles.map((role: RoleDefinition) => {
                   const active = role.id === (selectedRole?.id ?? -1);
+                  const canReset = isSuperAdmin && role.name !== ROLES.SUPER_ADMIN;
+                  const atDefault = isRoleAtDefault(role);
                   return (
-                    <li key={role.id}>
+                    <li key={role.id} className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => setSelectedId(role.id)}
-                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                        className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
                           active
                             ? "bg-primary/10 font-semibold text-[#004080]"
                             : "text-slate-700 hover:bg-slate-50"
                         }`}
                       >
-                        <span>{roleDisplayName(role.name)}</span>
-                        <Badge variant="muted" className="text-[10px] tabular-nums">
+                        <span className="truncate">{roleDisplayName(role.name)}</span>
+                        <Badge variant="muted" className="ml-2 shrink-0 text-[10px] tabular-nums">
                           {role.nav_permissions.length}
                         </Badge>
                       </button>
+                      {canReset && (
+                        <button
+                          type="button"
+                          title={atDefault ? "Already at default permissions" : "Reset to default"}
+                          aria-label={`Reset ${roleDisplayName(role.name)} to default`}
+                          onClick={() => handleReset(role)}
+                          disabled={atDefault || resetPermissions.isPending}
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-[#004080] disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      )}
                     </li>
                   );
                 })}
@@ -203,12 +254,22 @@ export function RolesPage() {
                     </p>
                   </div>
                   {isSuperAdmin && selectedRole.name !== ROLES.SUPER_ADMIN && (
-                    <Button
-                      onClick={handleSave}
-                      disabled={!isDirty || updatePermissions.isPending}
-                    >
-                      {updatePermissions.isPending ? "Saving…" : "Save changes"}
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleReset(selectedRole)}
+                        disabled={isRoleAtDefault(selectedRole) || resetPermissions.isPending}
+                      >
+                        <RotateCcw className="mr-2 h-4 w-4" />
+                        {resetPermissions.isPending ? "Resetting…" : "Reset to default"}
+                      </Button>
+                      <Button
+                        onClick={handleSave}
+                        disabled={!isDirty || updatePermissions.isPending}
+                      >
+                        {updatePermissions.isPending ? "Saving…" : "Save changes"}
+                      </Button>
+                    </div>
                   )}
                 </div>
 
@@ -243,8 +304,8 @@ export function RolesPage() {
                 </div>
 
                 {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-                {saved && !error && (
-                  <p className="mt-4 text-sm text-emerald-700">Page access updated for this account.</p>
+                {successMessage && !error && (
+                  <p className="mt-4 text-sm text-emerald-700">{successMessage}</p>
                 )}
               </>
             )}
