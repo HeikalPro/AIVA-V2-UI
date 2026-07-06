@@ -13,10 +13,19 @@ export function useChatSessions(accountId: number | null) {
 export function useCreateSession() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (accountId: number) =>
-      apiPost<ChatSession>("/api/chat/sessions", { account_id: accountId }),
-    onSuccess: (_data, accountId) => {
-      qc.invalidateQueries({ queryKey: ["chat-sessions", accountId] });
+    mutationFn: ({
+      accountId,
+      activeQueues,
+    }: {
+      accountId: number;
+      activeQueues?: string[];
+    }) =>
+      apiPost<ChatSession>("/api/chat/sessions", {
+        account_id: accountId,
+        active_queues: activeQueues?.length ? activeQueues : undefined,
+      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["chat-sessions", vars.accountId] });
     },
   });
 }

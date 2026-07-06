@@ -215,6 +215,38 @@ export type ChatSession = {
   started_at?: string | null;
   ended_at?: string | null;
   message_count?: number | null;
+  active_queues?: string[];
+};
+
+export type QueueGroup = {
+  key: string;
+  label: string;
+};
+
+export type ChatQueueAccess = {
+  account_id: number;
+  available_queues: QueueGroup[];
+  allowed_queues: string[];
+  default_active_queues: string[];
+};
+
+export type AgentQueueAccess = {
+  account_id: number;
+  user_id: number;
+  available_queues: QueueGroup[];
+  assigned_queues: string[];
+  allowed_queues: string[];
+};
+
+export type AgentQueueSummaryItem = {
+  user_id: number;
+  queues: QueueGroup[];
+  is_restricted: boolean;
+};
+
+export type AgentQueueSummary = {
+  account_id: number;
+  agents: AgentQueueSummaryItem[];
 };
 
 export type KbSource = {

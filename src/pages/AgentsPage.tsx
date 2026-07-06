@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { GraduationCap, Plus, UserCheck, UserPlus, Users } from "lucide-react";
+import { GraduationCap, ListChecks, Plus, UserCheck, UserPlus, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
 import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAgents, usePromoteTrainee } from "@/hooks/useAgents";
+import { useAgentsQueueSummary } from "@/hooks/useKbQueues";
 import { useAccounts } from "@/hooks/useAccounts";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable } from "@/components/shared/DataTable";
@@ -11,6 +12,7 @@ import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { TraineeDialog } from "@/components/agents/TraineeDialog";
+import { AgentQueueAccessDialog } from "@/components/agents/AgentQueueAccessDialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -31,6 +33,7 @@ export function AgentsPage() {
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
   const { data = [], isLoading } = useAgents(selectedAccountId);
+  const { data: queueSummary } = useAgentsQueueSummary(selectedAccountId);
   const promoteTrainee = usePromoteTrainee();
   const [traineeOpen, setTraineeOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -38,8 +41,18 @@ export function AgentsPage() {
   const [typeFilter, setTypeFilter] = useState<AgentTypeFilter>("ALL");
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [promotingId, setPromotingId] = useState<number | null>(null);
+  const [queueAgent, setQueueAgent] = useState<User | null>(null);
+  const [queueDialogOpen, setQueueDialogOpen] = useState(false);
 
   const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+
+  const queuesByUserId = useMemo(() => {
+    const map = new Map<number, { queues: { key: string; label: string }[]; isRestricted: boolean }>();
+    for (const item of queueSummary?.agents ?? []) {
+      map.set(item.user_id, { queues: item.queues, isRestricted: item.is_restricted });
+    }
+    return map;
+  }, [queueSummary]);
 
   const typeCounts = useMemo(
     () => ({
@@ -62,6 +75,7 @@ export function AgentsPage() {
             u.last_name ?? "",
             u.status,
             agentTypeLabel(u),
+            ...(queuesByUserId.get(u.id)?.queues.map((q) => q.label) ?? []),
             ...u.account_ids.map((id) => accountNameById.get(id) ?? ""),
           ].join(" "),
         [
@@ -71,7 +85,7 @@ export function AgentsPage() {
             (typeFilter === "TRAINEES" ? Boolean(u.is_trainee) : !u.is_trainee),
         ],
       ),
-    [data, search, statusFilter, typeFilter, accountNameById],
+    [data, search, statusFilter, typeFilter, accountNameById, queuesByUserId],
   );
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
@@ -219,23 +233,62 @@ export function AgentsPage() {
             ),
           },
           { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
+          {
+            key: "kb_queues",
+            header: "KB Queues",
+            render: (r) => {
+              const summary = queuesByUserId.get(r.id);
+              if (!summary) return "—";
+              if (!summary.isRestricted) {
+                return (
+                  <Badge variant="muted" title="No supervisor restriction — all queues allowed">
+                    All queues
+                  </Badge>
+                );
+              }
+              return (
+                <div className="flex flex-wrap gap-1">
+                  {summary.queues.map((q) => (
+                    <Badge key={q.key} variant="default">
+                      {q.label}
+                    </Badge>
+                  ))}
+                </div>
+              );
+            },
+          },
           ...(canManageAgents
             ? [
                 {
                   key: "actions",
                   header: "",
-                  render: (r: User) =>
-                    r.is_trainee ? (
+                  render: (r: User) => (
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handlePromote(r)}
-                        disabled={promotingId === r.id || selectedAccountId == null}
+                        onClick={() => {
+                          setQueueAgent(r);
+                          setQueueDialogOpen(true);
+                        }}
+                        disabled={selectedAccountId == null}
                       >
-                        <UserPlus className="mr-2 h-4 w-4" />
-                        {promotingId === r.id ? "Promoting…" : "Promote to agent"}
+                        <ListChecks className="mr-2 h-4 w-4" />
+                        Queues
                       </Button>
-                    ) : null,
+                      {r.is_trainee ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePromote(r)}
+                          disabled={promotingId === r.id || selectedAccountId == null}
+                        >
+                          <UserPlus className="mr-2 h-4 w-4" />
+                          {promotingId === r.id ? "Promoting…" : "Promote to agent"}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ),
                 },
               ]
             : []),
@@ -267,6 +320,13 @@ export function AgentsPage() {
         onOpenChange={setTraineeOpen}
         accounts={accounts}
         defaultAccountId={selectedAccountId != null ? String(selectedAccountId) : ""}
+      />
+
+      <AgentQueueAccessDialog
+        open={queueDialogOpen}
+        onOpenChange={setQueueDialogOpen}
+        agent={queueAgent}
+        accountId={selectedAccountId}
       />
     </div>
   );

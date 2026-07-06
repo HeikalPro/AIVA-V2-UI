@@ -10,6 +10,8 @@ import {
   useSessionMessages,
   sendMessageStream,
 } from "@/hooks/useChat";
+import { useChatQueueAccess, useUpdateSessionQueues } from "@/hooks/useKbQueues";
+import { QueueSelector } from "@/components/chat/QueueSelector";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { formatQueryError, formatUserError } from "@/lib/errors";
@@ -42,12 +44,14 @@ function formatAgentName(session: ChatSession): string {
 
 function formatSessionLabel(session: ChatSession) {
   const agent = formatAgentName(session);
+  const queues =
+    session.active_queues?.length ? session.active_queues.join("+") : "";
   const date = session.started_at ? new Date(session.started_at).toLocaleString() : "";
   const msgs =
     session.message_count != null
       ? `${session.message_count} message${session.message_count === 1 ? "" : "s"}`
       : "";
-  return [agent, date, msgs].filter(Boolean).join(" · ");
+  return [agent, queues, date, msgs].filter(Boolean).join(" · ");
 }
 
 export function ChatPage() {
@@ -60,10 +64,12 @@ export function ChatPage() {
     error: accountsLoadError,
   } = useAccounts(isSuperAdmin ? null : user?.organization_id);
   const createSession = useCreateSession();
+  const updateSessionQueues = useUpdateSessionQueues();
 
   const [accountId, setAccountId] = useState<number | null>(null);
   const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [selectedQueues, setSelectedQueues] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -72,6 +78,7 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
 
   const { data: sessions = [], isLoading: sessionsLoading } = useChatSessions(selectedAccountId);
+  const { data: queueAccess } = useChatQueueAccess(selectedAccountId);
   const {
     data: storedMessages,
     refetch: refetchMessages,
@@ -81,6 +88,21 @@ export function ChatPage() {
   const applyMessages = useCallback((rows: ChatMessage[] | undefined) => {
     setMessages(rows?.length ? messagesToUi(rows) : []);
   }, []);
+
+  useEffect(() => {
+    if (!queueAccess) return;
+    setSelectedQueues((prev) =>
+      prev.length ? prev : queueAccess.default_active_queues,
+    );
+  }, [queueAccess]);
+
+  useEffect(() => {
+    if (!sessionId || !sessions.length) return;
+    const session = sessions.find((s) => s.id === sessionId);
+    if (session?.active_queues?.length) {
+      setSelectedQueues(session.active_queues);
+    }
+  }, [sessionId, sessions]);
 
   useEffect(() => {
     applyMessages(storedMessages);
@@ -124,8 +146,12 @@ export function ChatPage() {
     if (!selectedAccountId) return;
     setError(null);
     try {
-      const session = await createSession.mutateAsync(selectedAccountId);
+      const session = await createSession.mutateAsync({
+        accountId: selectedAccountId,
+        activeQueues: selectedQueues.length ? selectedQueues : queueAccess?.default_active_queues,
+      });
       setSessionId(session.id);
+      if (session.active_queues?.length) setSelectedQueues(session.active_queues);
       setMessages([]);
       setLatency(null);
       localStorage.setItem(sessionStorageKey(selectedAccountId), String(session.id));
@@ -139,6 +165,17 @@ export function ChatPage() {
     setSessionId(null);
     setMessages([]);
     setLatency(null);
+    setSelectedQueues([]);
+  }
+
+  async function onQueuesChange(keys: string[]) {
+    setSelectedQueues(keys);
+    if (!sessionId) return;
+    try {
+      await updateSessionQueues.mutateAsync({ sessionId, activeQueues: keys });
+    } catch (e) {
+      setError(formatUserError(e, "chat"));
+    }
   }
 
   function onSessionChange(nextSessionId: number) {
@@ -260,6 +297,17 @@ export function ChatPage() {
           {historyBusy ? "Loading…" : "Load History"}
         </Button>
       </div>
+
+      {queueAccess && queueAccess.available_queues.length > 0 && (
+        <QueueSelector
+          queues={queueAccess.available_queues}
+          selected={
+            selectedQueues.length ? selectedQueues : queueAccess.default_active_queues
+          }
+          onChange={(keys) => void onQueuesChange(keys)}
+          disabled={streaming || updateSessionQueues.isPending}
+        />
+      )}
 
       {accountsError && (
         <ErrorAlert message={formatQueryError(accountsLoadError)} />
