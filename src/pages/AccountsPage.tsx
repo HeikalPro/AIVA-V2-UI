@@ -48,7 +48,6 @@ export function AccountsPage() {
     name: "",
     description: "",
     corpus_id: "",
-    kb_source_base_url: "",
     llm_config_id: "",
     status: "ACTIVE",
   });
@@ -116,7 +115,6 @@ export function AccountsPage() {
       name: "",
       description: "",
       corpus_id: "",
-      kb_source_base_url: "",
       llm_config_id: "",
       status: "ACTIVE",
     });
@@ -131,7 +129,6 @@ export function AccountsPage() {
       name: acc.name,
       description: acc.description ?? "",
       corpus_id: acc.corpus_id ?? "",
-      kb_source_base_url: acc.kb_source_base_url ?? "",
       llm_config_id: acc.llm_config_id != null ? String(acc.llm_config_id) : "",
       status: acc.status,
     });
@@ -174,7 +171,6 @@ export function AccountsPage() {
         name: form.name,
         description: form.description || null,
         corpus_id: form.corpus_id || null,
-        kb_source_base_url: form.kb_source_base_url.trim() || null,
         llm_config_id: form.llm_config_id ? Number(form.llm_config_id) : null,
         status: form.status,
       };
@@ -297,19 +293,6 @@ export function AccountsPage() {
               value={form.corpus_id}
               onChange={(corpusId) => setForm({ ...form, corpus_id: corpusId })}
             />
-            <div>
-              <Label>KB source URL</Label>
-              <Input
-                value={form.kb_source_base_url}
-                onChange={(e) => setForm({ ...form, kb_source_base_url: e.target.value })}
-                placeholder="http://192.168.1.13/halankb/view.php?id="
-                className="mt-1"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">
-                URL template for source links. The article ID is appended at the end (e.g. …view.php?id=158)
-                or use {"{id}"} anywhere (e.g. …/article/{"{id}"}). Leave empty to use the server default.
-              </p>
-            </div>
             <div>
               <Label>LLM Config</Label>
               <Select value={form.llm_config_id} onChange={(e) => setForm({ ...form, llm_config_id: e.target.value })} className="mt-1">
