@@ -21,7 +21,42 @@ import { Select } from "@/components/ui/select";
 import { CorpusSelect } from "@/components/shared/CorpusSelect";
 import { useCorpora } from "@/hooks/useCorpora";
 import { resolveCorpusDisplayName } from "@/lib/corpus";
-import type { Account, User } from "@/types/api";
+import {
+  ALL_CALCULATOR_TYPES,
+  buildCalculatorProductsPayload,
+  CALCULATOR_TENOR_OPTIONS,
+  CALCULATOR_TYPE_OPTIONS,
+  calculatorProductsFromAccount,
+  defaultCalculatorProductsForm,
+  type CalculatorProductForm,
+  type CalculatorTypeKey,
+} from "@/lib/calculatorDefaults";
+import type { Account, User, WidgetFeatures } from "@/types/api";
+
+function calculatorTypesFromAccount(acc: Account | null): CalculatorTypeKey[] {
+  const types = acc?.widget_features?.installment_calculator?.types;
+  if (Array.isArray(types) && types.length > 0) return [...types];
+  return [...ALL_CALCULATOR_TYPES];
+}
+
+function widgetFeaturesFromForm(
+  enabled: boolean,
+  types: string[],
+  products: Record<CalculatorTypeKey, CalculatorProductForm>,
+): WidgetFeatures {
+  const activeTypes: CalculatorTypeKey[] = enabled
+    ? types.filter((t): t is CalculatorTypeKey =>
+        ALL_CALCULATOR_TYPES.includes(t as CalculatorTypeKey),
+      )
+    : [];
+  return {
+    installment_calculator: {
+      enabled,
+      types: activeTypes,
+      products: enabled ? buildCalculatorProductsPayload(activeTypes, products) : undefined,
+    },
+  };
+}
 
 export function AccountsPage() {
   const { user } = useAuth();
@@ -50,6 +85,9 @@ export function AccountsPage() {
     corpus_id: "",
     llm_config_id: "",
     status: "ACTIVE",
+    calculator_enabled: false,
+    calculator_types: [...ALL_CALCULATOR_TYPES],
+    calculator_products: defaultCalculatorProductsForm(),
   });
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -117,6 +155,9 @@ export function AccountsPage() {
       corpus_id: "",
       llm_config_id: "",
       status: "ACTIVE",
+      calculator_enabled: false,
+      calculator_types: [...ALL_CALCULATOR_TYPES],
+      calculator_products: defaultCalculatorProductsForm(),
     });
     setError(null);
     setDialogOpen(true);
@@ -131,6 +172,12 @@ export function AccountsPage() {
       corpus_id: acc.corpus_id ?? "",
       llm_config_id: acc.llm_config_id != null ? String(acc.llm_config_id) : "",
       status: acc.status,
+      calculator_enabled: acc.widget_features?.installment_calculator?.enabled ?? false,
+      calculator_types: calculatorTypesFromAccount(acc),
+      calculator_products: calculatorProductsFromAccount(
+        calculatorTypesFromAccount(acc),
+        acc.widget_features?.installment_calculator?.products,
+      ),
     });
     setError(null);
     setDialogOpen(true);
@@ -173,6 +220,11 @@ export function AccountsPage() {
         corpus_id: form.corpus_id || null,
         llm_config_id: form.llm_config_id ? Number(form.llm_config_id) : null,
         status: form.status,
+        widget_features: widgetFeaturesFromForm(
+          form.calculator_enabled,
+          form.calculator_types,
+          form.calculator_products,
+        ),
       };
       if (editing) {
         await updateAccount.mutateAsync({ id: editing.id, body });
@@ -276,7 +328,7 @@ export function AccountsPage() {
       />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader><DialogTitle>{editing ? "Edit Account" : "New Account"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             {!editing && isSuperAdmin && (
@@ -293,6 +345,136 @@ export function AccountsPage() {
               value={form.corpus_id}
               onChange={(corpusId) => setForm({ ...form, corpus_id: corpusId })}
             />
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.calculator_enabled}
+                  onChange={(e) => setForm({ ...form, calculator_enabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-sm font-medium text-slate-800">Installment calculator (widget)</span>
+              </label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Enable for Hallan-style accounts. Other accounts can leave this off.
+              </p>
+              {form.calculator_enabled && (
+                <div className="mt-3 space-y-3">
+                  {CALCULATOR_TYPE_OPTIONS.map((opt) => {
+                    const typeKey = opt.key as CalculatorTypeKey;
+                    const on = form.calculator_types.includes(opt.key);
+                    const product = form.calculator_products[typeKey];
+                    return (
+                      <div key={opt.key} className="rounded-lg border border-slate-200 bg-white p-3">
+                        <label className="flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => {
+                              const next = on
+                                ? form.calculator_types.filter((t) => t !== opt.key)
+                                : [...form.calculator_types, opt.key];
+                              if (next.length === 0) return;
+                              setForm({ ...form, calculator_types: next });
+                            }}
+                            className="h-3.5 w-3.5 rounded border-slate-300"
+                          />
+                          <span className="text-sm font-medium text-slate-800">{opt.label}</span>
+                        </label>
+                        {on && (
+                          <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+                            {opt.usesApr && (
+                              <div>
+                                <Label className="text-xs">APR (%)</Label>
+                                <Input
+                                  value={product.aprPercent}
+                                  onChange={(e) =>
+                                    setForm({
+                                      ...form,
+                                      calculator_products: {
+                                        ...form.calculator_products,
+                                        [typeKey]: { ...product, aprPercent: e.target.value },
+                                      },
+                                    })
+                                  }
+                                  placeholder="55"
+                                  className="mt-1 h-9"
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <Label className="text-xs">Tenors (months)</Label>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {CALCULATOR_TENOR_OPTIONS.map((month) => {
+                                  const tenorOn = product.tenors.includes(month);
+                                  return (
+                                    <button
+                                      key={month}
+                                      type="button"
+                                      onClick={() => {
+                                        const nextTenors = tenorOn
+                                          ? product.tenors.filter((t) => t !== month)
+                                          : [...product.tenors, month];
+                                        if (nextTenors.length === 0) return;
+                                        setForm({
+                                          ...form,
+                                          calculator_products: {
+                                            ...form.calculator_products,
+                                            [typeKey]: { ...product, tenors: nextTenors },
+                                          },
+                                        });
+                                      }}
+                                      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                        tenorOn
+                                          ? "border-gochat bg-gochat/10 text-gochat"
+                                          : "border-slate-300 bg-slate-50 text-slate-600"
+                                      }`}
+                                    >
+                                      {month}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {!opt.usesApr && (
+                              <div>
+                                <Label className="text-xs">Flat rate per month (%)</Label>
+                                <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                  {product.tenors.map((month) => (
+                                    <div key={month}>
+                                      <span className="text-[10px] text-muted-foreground">{month} mo</span>
+                                      <Input
+                                        value={product.flatRatePercents[String(month)] ?? ""}
+                                        onChange={(e) =>
+                                          setForm({
+                                            ...form,
+                                            calculator_products: {
+                                              ...form.calculator_products,
+                                              [typeKey]: {
+                                                ...product,
+                                                flatRatePercents: {
+                                                  ...product.flatRatePercents,
+                                                  [String(month)]: e.target.value,
+                                                },
+                                              },
+                                            },
+                                          })
+                                        }
+                                        className="mt-0.5 h-8 text-xs"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div>
               <Label>LLM Config</Label>
               <Select value={form.llm_config_id} onChange={(e) => setForm({ ...form, llm_config_id: e.target.value })} className="mt-1">

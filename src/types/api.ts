@@ -59,6 +59,23 @@ export type CorpusSummary = {
   slug: string;
 };
 
+export type WidgetInstallmentCalculatorConfig = {
+  enabled: boolean;
+  types?: ("cash-it" | "instant-approval" | "branches")[];
+  products?: Record<
+    string,
+    {
+      apr?: number | null;
+      tenors?: number[] | null;
+      flat_rates?: Record<string, number> | null;
+    }
+  > | null;
+};
+
+export type WidgetFeatures = {
+  installment_calculator?: WidgetInstallmentCalculatorConfig;
+};
+
 export type Account = {
   id: number;
   organization_id: number;
@@ -71,6 +88,7 @@ export type Account = {
   status: string;
   /** URL template for KB source links; append ID or use {id}. Falls back to server default if empty. */
   kb_source_base_url?: string | null;
+  widget_features?: WidgetFeatures | null;
   created_at?: string | null;
 };
 
@@ -82,6 +100,7 @@ export type AccountCreate = {
   llm_config_id?: number | null;
   status?: string;
   kb_source_base_url?: string | null;
+  widget_features?: WidgetFeatures | null;
 };
 
 export type AccountUpdate = {
@@ -91,6 +110,7 @@ export type AccountUpdate = {
   llm_config_id?: number | null;
   status?: string;
   kb_source_base_url?: string | null;
+  widget_features?: WidgetFeatures | null;
 };
 
 export type User = {
