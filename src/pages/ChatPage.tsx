@@ -19,9 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { ChatMessage, ChatSession, KbSource } from "@/types/api";
+import type { ChatMessage, ChatSession } from "@/types/api";
 
-type Msg = { role: string; text: string; sources?: KbSource[] };
+type Msg = { role: string; text: string };
 
 function sessionStorageKey(accountId: number) {
   return `aiva_chat_session_${accountId}`;
@@ -31,7 +31,6 @@ function messagesToUi(rows: ChatMessage[]): Msg[] {
   return rows.map((m) => ({
     role: m.sender_type,
     text: m.message_text,
-    sources: m.sources?.length ? m.sources : undefined,
   }));
 }
 
@@ -193,14 +192,13 @@ export function ChatPage() {
     setMessages((prev) => [...prev, { role: "USER", text: userText }, { role: "AI", text: "" }]);
 
     let assistant = "";
-    let sources: KbSource[] | undefined;
     try {
       await sendMessageStream(sessionId, userText, 10, (ev) => {
         if (ev.type === "token" && ev.text) {
           assistant += ev.text;
           setMessages((prev) => {
             const copy = [...prev];
-            copy[copy.length - 1] = { role: "AI", text: assistant, sources };
+            copy[copy.length - 1] = { role: "AI", text: assistant };
             return copy;
           });
         }
@@ -210,33 +208,16 @@ export function ChatPage() {
             : `Error: ${ev.message}`;
           setMessages((prev) => {
             const copy = [...prev];
-            copy[copy.length - 1] = { role: "AI", text: assistant, sources };
+            copy[copy.length - 1] = { role: "AI", text: assistant };
             return copy;
           });
         }
         if (ev.type === "done") {
           if (ev.latency_ms !== undefined) setLatency(ev.latency_ms);
-          if (ev.sources?.length) {
-            sources = ev.sources;
-            setMessages((prev) => {
-              const copy = [...prev];
-              const last = copy[copy.length - 1];
-              if (last?.role === "AI") copy[copy.length - 1] = { ...last, sources: ev.sources };
-              return copy;
-            });
-          }
         }
       });
       await qc.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
       await qc.invalidateQueries({ queryKey: ["chat-sessions", selectedAccountId] });
-      if (sources?.length) {
-        setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last?.role === "AI") copy[copy.length - 1] = { ...last, sources };
-          return copy;
-        });
-      }
     } catch (e) {
       setError(formatUserError(e, "chat"));
     } finally {
@@ -342,22 +323,6 @@ export function ChatPage() {
             <p className="whitespace-pre-wrap text-sm text-slate-800">
               {m.text || (streaming && i === messages.length - 1 ? "..." : "")}
             </p>
-            {m.role === "AI" && m.sources && m.sources.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-                <span className="text-xs font-semibold uppercase text-slate-500">Sources</span>
-                {m.sources.map((s) => (
-                  <a
-                    key={s.parent_id}
-                    href={s.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-[#004080] hover:underline"
-                  >
-                    {s.parent_id}
-                  </a>
-                ))}
-              </div>
-            )}
           </div>
         ))}
       </div>
