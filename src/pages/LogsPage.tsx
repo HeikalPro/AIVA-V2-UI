@@ -232,7 +232,7 @@ export function LogsPage() {
     if (!row) return null;
 
     const entries = Object.entries(row)
-      .filter(([key, value]) => value != null)
+      .filter(([, value]) => value != null)
       .map(([key, value]) => ({ key, value }));
 
     return (
