@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ScrollText } from "lucide-react";
+import { RefreshCw, ScrollText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -36,6 +36,18 @@ function snippet(text: string | null | undefined, max = 80): string {
 function agentLabel(row: AgentMetric): string {
   const name = [row.agent_first_name, row.agent_last_name].filter(Boolean).join(" ").trim();
   return name || row.agent_email || `User #${row.user_id}`;
+}
+
+function RefreshButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <span className="text-xs text-muted-foreground">Auto-refreshes every 10s</span>
+      <Button variant="outline" size="sm" onClick={onClick} disabled={busy}>
+        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
+        Refresh
+      </Button>
+    </div>
+  );
 }
 
 function SourceBadge({ value }: { value: string | null | undefined }) {
@@ -106,14 +118,22 @@ export function LogsPage() {
     selectedAccountId,
     tab === "agents" && selectedAccountId != null,
   );
-  const { data: ragData, isLoading: ragLoading, isError: ragError, error: ragLoadError } = useRagLogs(
-    { status: eventFilter === "ALL" ? undefined : eventFilter },
-    tab === "rag",
-  );
-  const { data: aiData, isLoading: aiLoading, isError: aiError, error: aiLoadError } = useAiRequestLogs(
-    { status: eventFilter === "ALL" ? undefined : eventFilter },
-    tab === "ai-requests",
-  );
+  const {
+    data: ragData,
+    isLoading: ragLoading,
+    isError: ragError,
+    error: ragLoadError,
+    refetch: refetchRag,
+    isFetching: ragFetching,
+  } = useRagLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "rag");
+  const {
+    data: aiData,
+    isLoading: aiLoading,
+    isError: aiError,
+    error: aiLoadError,
+    refetch: refetchAi,
+    isFetching: aiFetching,
+  } = useAiRequestLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "ai-requests");
 
   const activityRows = useMemo(
     () =>
@@ -426,6 +446,7 @@ export function LogsPage() {
 
       {tab === "rag" && (
         <>
+          <RefreshButton onClick={() => refetchRag()} busy={ragFetching} />
           <ErrorAlert message={ragError ? formatUserError(ragLoadError) : null} />
           <TableFilters
             search={search}
@@ -462,6 +483,7 @@ export function LogsPage() {
 
       {tab === "ai-requests" && (
         <>
+          <RefreshButton onClick={() => refetchAi()} busy={aiFetching} />
           <ErrorAlert message={aiError ? formatUserError(aiLoadError) : null} />
           <TableFilters
             search={search}

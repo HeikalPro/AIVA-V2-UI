@@ -2,6 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api-client";
 import type { AiRequestList, AuditLogList, HttpRequestLogList, RagRetrievalList, SignInLogList } from "@/types/api";
 
+// Poll the live AI logs while their tab is open so new rows appear without a manual reload.
+const LIVE_LOG_REFETCH_MS = 10_000;
+
 type ActivityParams = {
   limit?: number;
   offset?: number;
@@ -81,6 +84,7 @@ export function useRagLogs(params: RagLogParams = {}, enabled = true) {
     queryKey: ["logs", "rag", params],
     queryFn: () => apiGet<RagRetrievalList>(`/api/logs/rag?${search.toString()}`),
     enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
   });
 }
 
@@ -102,5 +106,6 @@ export function useAiRequestLogs(params: AiRequestLogParams = {}, enabled = true
     queryKey: ["logs", "ai-requests", params],
     queryFn: () => apiGet<AiRequestList>(`/api/logs/ai-requests?${search.toString()}`),
     enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
   });
 }
