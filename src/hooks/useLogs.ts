@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api-client";
-import type { AuditLogList, HttpRequestLogList, SignInLogList } from "@/types/api";
+import type { AiRequestList, AuditLogList, HttpRequestLogList, RagRetrievalList, SignInLogList } from "@/types/api";
 
 type ActivityParams = {
   limit?: number;
@@ -58,7 +58,49 @@ export function useApiLogs(params: ApiLogParams = {}, enabled = true) {
 
   return useQuery({
     queryKey: ["logs", "api", params],
-    queryFn: () => apiGet<HttpRequestLogList>(`/api/logs/api?${search.toString()}`),
+    queryFn: () => apiGet<HttpRequestLogList>(`/api/http-logs?${search.toString()}`),
+    enabled,
+  });
+}
+
+type RagLogParams = {
+  limit?: number;
+  offset?: number;
+  account_id?: number | null;
+  status?: string;
+};
+
+export function useRagLogs(params: RagLogParams = {}, enabled = true) {
+  const search = new URLSearchParams();
+  search.set("limit", String(params.limit ?? 100));
+  search.set("offset", String(params.offset ?? 0));
+  if (params.account_id != null) search.set("account_id", String(params.account_id));
+  if (params.status) search.set("status", params.status);
+
+  return useQuery({
+    queryKey: ["logs", "rag", params],
+    queryFn: () => apiGet<RagRetrievalList>(`/api/logs/rag?${search.toString()}`),
+    enabled,
+  });
+}
+
+type AiRequestLogParams = {
+  limit?: number;
+  offset?: number;
+  account_id?: number | null;
+  status?: string;
+};
+
+export function useAiRequestLogs(params: AiRequestLogParams = {}, enabled = true) {
+  const search = new URLSearchParams();
+  search.set("limit", String(params.limit ?? 100));
+  search.set("offset", String(params.offset ?? 0));
+  if (params.account_id != null) search.set("account_id", String(params.account_id));
+  if (params.status) search.set("status", params.status);
+
+  return useQuery({
+    queryKey: ["logs", "ai-requests", params],
+    queryFn: () => apiGet<AiRequestList>(`/api/logs/ai-requests?${search.toString()}`),
     enabled,
   });
 }

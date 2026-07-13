@@ -536,3 +536,53 @@ export type HttpRequestLogList = {
   limit: number;
   offset: number;
 };
+
+export type RagRetrieval = {
+  id: number;
+  created_at?: string | null;
+  session_id?: number | null;
+  account_id?: number | null;
+  account_name?: string | null;
+  corpus_id?: string | null;
+  query_text?: string | null;
+  top_k?: number | null;
+  verticals?: string | null;
+  status: string;
+  chunks_returned?: number | null;
+  top_score?: number | null;
+  retrieval_ms?: number | null;
+  error_message?: string | null;
+  chunks_json?: string | null;
+  source?: string | null;
+  summary?: string | null;
+};
+
+export type RagRetrievalList = {
+  items: RagRetrieval[];
+  limit: number;
+  offset: number;
+};
+
+export type AiRequest = {
+  id: number;
+  session_id?: number | null;
+  account_id?: number | null;
+  account_name?: string | null;
+  organization_id?: number | null;
+  model_name?: string | null;
+  provider?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  response_time_ms?: number | null;
+  total_cost?: number | null;
+  status?: string | null;
+  error_message?: string | null;
+  source?: string | null;
+  summary?: string | null;
+};
+
+export type AiRequestList = {
+  items: AiRequest[];
+  limit: number;
+  offset: number;
+};
