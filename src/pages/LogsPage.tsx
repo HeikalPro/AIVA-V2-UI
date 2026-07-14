@@ -236,7 +236,6 @@ export function LogsPage() {
     { key: "status", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
     { key: "model", header: "Model", render: (r) => snippet(r.model_name, 40) },
     { key: "tokens", header: "Tokens (in→out)", render: (r) => `${r.input_tokens ?? 0}→${r.output_tokens ?? 0}` },
-    { key: "cost", header: "Cost (USD)", sortable: true, sortValue: (r) => r.total_cost ?? -1, render: (r) => (r.total_cost != null ? `$${r.total_cost.toFixed(4)}` : "—") },
     { key: "ms", header: "Latency (ms)", render: (r) => String(r.response_time_ms ?? "—") },
     { key: "account", header: "Account", render: (r) => r.account_name ?? (r.account_id ? `#${r.account_id}` : "—") },
   ];
