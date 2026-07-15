@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, AlertCircle, CheckCircle2, Clock, Coins, Gauge, Timer } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Clock, Coins, DollarSign, Gauge, Timer } from "lucide-react";
 import { useAiMetrics } from "@/hooks/useLogs";
 import { KPIStatCard } from "@/components/shared/KPIStatCard";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -23,6 +23,13 @@ function fmtTokens(n: number | null | undefined): string {
 function fmtPct(rate: number | null | undefined): string {
   if (rate == null) return "—";
   return `${(rate * 100).toFixed(1)}%`;
+}
+
+// Cost is in EGP and already includes the configured markup (server-side, SovereignEG rates).
+function fmtCost(n: number | null | undefined): string {
+  if (n == null) return "—";
+  const digits = n > 0 && n < 1 ? 4 : 2;
+  return `E£${n.toLocaleString("en", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 export function AiMetricsPanel({ accountId }: { accountId?: number | null }) {
@@ -63,11 +70,11 @@ export function AiMetricsPanel({ accountId }: { accountId?: number | null }) {
           <p className="text-xs text-muted-foreground">Aggregate LLM-call stats across all statuses. Filter by date to scope the window.</p>
         </div>
         <div className="flex items-end gap-2">
-          <div>
+          <div className="w-40">
             <Label htmlFor="ai-start">From</Label>
             <Input id="ai-start" type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1" />
           </div>
-          <div>
+          <div className="w-40">
             <Label htmlFor="ai-end">To</Label>
             <Input id="ai-end" type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1" />
           </div>
@@ -82,12 +89,18 @@ export function AiMetricsPanel({ accountId }: { accountId?: number | null }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <KPIStatCard label="Total LLM calls" value={summary ? summary.total_calls.toLocaleString() : "—"} icon={<Activity className="h-4 w-4" />} />
         <KPIStatCard label="Avg latency" value={fmtLatency(summary?.avg_latency_ms)} icon={<Clock className="h-4 w-4" />} />
         <KPIStatCard label="Min latency" value={fmtLatency(summary?.min_latency_ms)} icon={<Gauge className="h-4 w-4" />} />
         <KPIStatCard label="Max latency" value={fmtLatency(summary?.max_latency_ms)} icon={<Timer className="h-4 w-4" />} />
         <KPIStatCard label="Total tokens" value={fmtTokens(summary?.total_tokens)} icon={<Coins className="h-4 w-4" />} />
+        <KPIStatCard
+          label="Total cost"
+          value={fmtCost(summary?.total_cost)}
+          icon={<DollarSign className="h-4 w-4" />}
+          iconColor="bg-amber-100 text-amber-700"
+        />
         <KPIStatCard
           label="Success rate"
           value={fmtPct(summary?.success_rate)}

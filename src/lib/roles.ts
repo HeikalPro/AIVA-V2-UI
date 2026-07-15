@@ -22,7 +22,8 @@ export type NavPermissionKey =
   | "tickets"
   | "ingestion"
   | "logs"
-  | "system";
+  | "system"
+  | "widget-download";
 
 export type NavItem = {
   path: string;
@@ -132,6 +133,20 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "Activity",
     permission: "system",
     roles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
+  },
+  {
+    path: "/widget-download",
+    label: "Widget Download",
+    icon: "Package",
+    permission: "widget-download",
+    roles: [
+      ROLES.SUPER_ADMIN,
+      ROLES.ORG_ADMIN,
+      ROLES.ACCOUNT_MANAGER,
+      ROLES.SUPERVISOR,
+      ROLES.AGENT,
+      ROLES.DEVELOPER,
+    ],
   },
 ];
 

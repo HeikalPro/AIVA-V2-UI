@@ -132,6 +132,50 @@ export function apiDelete<T>(path: string, auth = true) {
   return request<T>("DELETE", path, undefined, { auth });
 }
 
+/** POST multipart/form-data (file upload). Lets the browser set the boundary; reuses auth + 401 refresh. */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const doFetch = async (): Promise<Response> => {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    const token = getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(`${baseUrl()}${path}`, { method: "POST", headers, body: form });
+  };
+
+  let res: Response;
+  try {
+    res = await doFetch();
+  } catch (err) {
+    wrapFetchError(err);
+  }
+
+  if (res.status === 401) {
+    const ok = await tryRefresh();
+    if (!ok) {
+      clearTokens();
+      throw new ApiError(formatUserError(new Error("Session expired"), "api"), 401);
+    }
+    try {
+      res = await doFetch();
+    } catch (err) {
+      wrapFetchError(err);
+    }
+  }
+
+  const text = await res.text();
+  let data: unknown = {};
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      data = text;
+    }
+  }
+  if (!res.ok) {
+    throw new ApiError(parseApiDetail(data) || `Request failed (${res.status})`, res.status);
+  }
+  return data as T;
+}
+
 export async function apiDownload(path: string, filename: string): Promise<void> {
   const headers: Record<string, string> = {};
   const token = getAccessToken();

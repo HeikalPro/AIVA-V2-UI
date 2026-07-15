@@ -237,7 +237,7 @@ export function LogsPage() {
       },
     },
     { key: "esc", header: "Escalations", render: (r) => String(r.escalation_count ?? "—") },
-    { key: "avg", header: "Avg response (s)", render: (r) => (r.avg_response_time != null ? r.avg_response_time.toFixed(2) : "—") },
+    { key: "avg", header: "Avg response (ms)", render: (r) => (r.avg_response_time != null ? r.avg_response_time.toFixed(2) : "—") },
   ];
 
   const ragColumns: Column<RagRetrieval>[] = [

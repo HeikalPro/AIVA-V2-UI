@@ -18,9 +18,9 @@ export function KPIStatCard({
       {icon ? (
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconColor}`}>{icon}</div>
       ) : null}
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-xl font-bold text-foreground">{value}</p>
+      <div className="min-w-0">
+        <p className="text-xs leading-tight text-muted-foreground">{label}</p>
+        <p className="text-xl font-bold tabular-nums text-foreground">{value}</p>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  Package,
   Shield,
   ThumbsUp,
   Ticket,
@@ -42,6 +43,7 @@ const ICONS: Record<string, LucideIcon> = {
   ScrollText,
   UserCheck,
   Activity,
+  Package,
 };
 
 function NavItem({

@@ -1,12 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { LLMConfig, LLMConfigCreate, LLMConfigUpdate } from "@/types/api";
+import type { LLMConfig, LLMConfigCreate, LLMConfigUpdate, ModelCatalogOut } from "@/types/api";
 
 export function useLLMConfigs(enabled = true) {
   return useQuery({
     queryKey: ["llm-configs"],
     queryFn: () => apiGet<LLMConfig[]>("/api/llm-configs"),
     enabled,
+  });
+}
+
+/** SovereignEG model catalog with live per-model pricing (EGP per 1M tokens) + fetch status. */
+export function useModelCatalog(enabled = true) {
+  return useQuery({
+    queryKey: ["model-catalog"],
+    queryFn: () => apiGet<ModelCatalogOut>("/api/llm-configs/model-catalog"),
+    enabled,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Force a live refetch from SovereignEG (bypasses the backend cache) and updates the query. */
+export function useRefreshModelCatalog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiGet<ModelCatalogOut>("/api/llm-configs/model-catalog?refresh=true"),
+    onSuccess: (data) => qc.setQueryData(["model-catalog"], data),
   });
 }
 

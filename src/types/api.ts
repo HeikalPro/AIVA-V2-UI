@@ -471,8 +471,40 @@ export type LLMConfigCreate = {
 
 export type LLMConfigUpdate = Partial<LLMConfigCreate>;
 
+export type ModelCatalogItem = {
+  id: string;
+  display_name?: string | null;
+  provider?: string | null;
+  modality?: string | null;
+  context_window?: number | null;
+  status?: string | null;
+  input_per_1m_egp?: number | null;
+  output_per_1m_egp?: number | null;
+  currency: string;
+};
+
+export type ModelCatalogOut = {
+  items: ModelCatalogItem[];
+  error?: string | null;
+  error_at?: string | null;
+  last_success_at?: string | null;
+  stale: boolean;
+};
+
 export type MessageResponse = {
   message: string;
+};
+
+export type WidgetRelease = {
+  id: number;
+  version: string;
+  original_filename: string;
+  file_size: number;
+  content_type?: string | null;
+  notes?: string | null;
+  uploaded_by: number;
+  uploaded_by_email?: string | null;
+  uploaded_at?: string | null;
 };
 
 export type AuditLog = {
@@ -634,6 +666,7 @@ export type AiMetricsSummary = {
   min_latency_ms?: number | null;
   max_latency_ms?: number | null;
   total_tokens: number;
+  total_cost?: number | null;
   success_count: number;
   failed_count: number;
   success_rate?: number | null;
