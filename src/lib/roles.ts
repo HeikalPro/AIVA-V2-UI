@@ -21,7 +21,8 @@ export type NavPermissionKey =
   | "chat"
   | "tickets"
   | "ingestion"
-  | "logs";
+  | "logs"
+  | "system";
 
 export type NavItem = {
   path: string;
@@ -124,6 +125,13 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "ScrollText",
     permission: "logs",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
+  },
+  {
+    path: "/system",
+    label: "System Health",
+    icon: "Activity",
+    permission: "system",
+    roles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
   },
 ];
 

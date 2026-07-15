@@ -6,6 +6,8 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useAgentMetrics } from "@/hooks/useAnalytics";
 import { useActivityLogs, useAiRequestLogs, useRagLogs, useSignInLogs } from "@/hooks/useLogs";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
+import { AiMetricsPanel } from "@/components/logs/AiMetricsPanel";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
@@ -17,7 +19,7 @@ import { Select } from "@/components/ui/select";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AgentMetric, AiRequest, AuditLog, RagRetrieval, SignInLog } from "@/types/api";
 
-type TabId = "activity" | "sign-in" | "agents" | "rag" | "ai-requests";
+type TabId = "activity" | "sign-in" | "agents" | "rag" | "ai-requests" | "errors";
 
 type LogRow = AuditLog | SignInLog | AgentMetric | RagRetrieval | AiRequest;
 
@@ -87,6 +89,7 @@ export function LogsPage() {
     { id: "agents", label: "Agent activity", show: isSuperAdmin || isOrgAdmin || isSupervisor || isAccountManager },
     { id: "rag", label: "RAG retrieval", show: canSeeAiLogs },
     { id: "ai-requests", label: "AI requests", show: canSeeAiLogs },
+    { id: "errors", label: "Error logs", show: canSeeAiLogs },
   ];
   const visibleTabs = tabs.filter((t) => t.show);
   const [tab, setTab] = useState<TabId>(visibleTabs[0]?.id ?? "activity");
@@ -214,7 +217,25 @@ export function LogsPage() {
   const agentColumns: Column<AgentMetric>[] = [
     { key: "agent", header: "Agent", sortable: true, sortValue: (r) => agentLabel(r), render: (r) => agentLabel(r) },
     { key: "email", header: "Email", render: (r) => r.agent_email ?? "—" },
-    { key: "ai", header: "AI requests", render: (r) => String(r.ai_usage_count ?? "—") },
+    { key: "ai", header: "AI requests", sortable: true, sortValue: (r) => r.ai_usage_count ?? -1, render: (r) => String(r.ai_usage_count ?? "—") },
+    { key: "success", header: "Successful answers", sortable: true, sortValue: (r) => r.successful_answers ?? -1, render: (r) => String(r.successful_answers ?? "—") },
+    {
+      key: "failed",
+      header: "Failed answers",
+      sortable: true,
+      sortValue: (r) => r.failed_answers ?? -1,
+      render: (r) => {
+        const n = r.failed_answers ?? 0;
+        return (
+          <span
+            className={n > 0 ? "cursor-help font-semibold text-red-600 underline decoration-dotted underline-offset-2" : ""}
+            title={n > 0 ? r.failure_reasons ?? "Reasons unavailable" : undefined}
+          >
+            {String(r.failed_answers ?? "—")}
+          </span>
+        );
+      },
+    },
     { key: "esc", header: "Escalations", render: (r) => String(r.escalation_count ?? "—") },
     { key: "avg", header: "Avg response (s)", render: (r) => (r.avg_response_time != null ? r.avg_response_time.toFixed(2) : "—") },
   ];
@@ -274,7 +295,7 @@ export function LogsPage() {
       <PageHeader
         icon={ScrollText}
         title="Logs"
-        description="Activity audit, sign-in security, agent usage, RAG retrievals, AI requests, and API traces."
+        description="Activity audit, sign-in security, agent usage, RAG retrievals, AI requests, and error diagnostics."
       />
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
@@ -482,6 +503,7 @@ export function LogsPage() {
 
       {tab === "ai-requests" && (
         <>
+          <AiMetricsPanel />
           <RefreshButton onClick={() => refetchAi()} busy={aiFetching} />
           <ErrorAlert message={aiError ? formatUserError(aiLoadError) : null} />
           <TableFilters
@@ -515,6 +537,8 @@ export function LogsPage() {
           />
         </>
       )}
+
+      {tab === "errors" && <ErrorLogsPanel />}
 
       <Dialog open={selectedRow !== null} onOpenChange={(open) => !open && setSelectedRow(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">

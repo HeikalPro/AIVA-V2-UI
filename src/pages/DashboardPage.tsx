@@ -6,6 +6,7 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useAgentMetrics, useDashboardStats } from "@/hooks/useAnalytics";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { KPIStatCard } from "@/components/shared/KPIStatCard";
+import { OverviewCharts } from "@/components/dashboard/OverviewCharts";
 import { DataTable } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
@@ -137,6 +138,8 @@ export function DashboardPage() {
             <KPIStatCard label="Input Tokens" value={stats?.total_input_tokens != null ? stats.total_input_tokens.toLocaleString() : "—"} icon={<Users className="h-4 w-4" />} iconColor="bg-sky-100 text-sky-600" />
             <KPIStatCard label="Total Cost" value={stats?.total_cost != null ? `$${stats.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "—"} icon={<DollarSign className="h-4 w-4" />} iconColor="bg-rose-100 text-rose-600" />
           </div>
+
+          <OverviewCharts accountId={selectedAccountId} />
 
           <div className="space-y-4">
             <div>

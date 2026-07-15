@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api-client";
-import type { AiRequestList, AuditLogList, HttpRequestLogList, RagRetrievalList, SignInLogList } from "@/types/api";
+import type {
+  AiMetrics,
+  AiRequestList,
+  AuditLogList,
+  ErrorLogList,
+  HttpRequestLogList,
+  RagRetrievalList,
+  SignInLogList,
+} from "@/types/api";
 
 // Poll the live AI logs while their tab is open so new rows appear without a manual reload.
 const LIVE_LOG_REFETCH_MS = 10_000;
@@ -83,6 +91,52 @@ export function useRagLogs(params: RagLogParams = {}, enabled = true) {
   return useQuery({
     queryKey: ["logs", "rag", params],
     queryFn: () => apiGet<RagRetrievalList>(`/api/logs/rag?${search.toString()}`),
+    enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
+  });
+}
+
+type ErrorEventParams = {
+  limit?: number;
+  offset?: number;
+  exception_type?: string;
+  start?: string;
+  end?: string;
+};
+
+export function useErrorEvents(params: ErrorEventParams = {}, enabled = true) {
+  const search = new URLSearchParams();
+  search.set("limit", String(params.limit ?? 200));
+  search.set("offset", String(params.offset ?? 0));
+  if (params.exception_type) search.set("exception_type", params.exception_type);
+  if (params.start) search.set("start", params.start);
+  if (params.end) search.set("end", params.end);
+
+  return useQuery({
+    queryKey: ["logs", "errors", params],
+    queryFn: () => apiGet<ErrorLogList>(`/api/logs/errors?${search.toString()}`),
+    enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
+  });
+}
+
+type AiMetricsParams = {
+  account_id?: number | null;
+  status?: string;
+  start?: string;
+  end?: string;
+};
+
+export function useAiMetrics(params: AiMetricsParams = {}, enabled = true) {
+  const search = new URLSearchParams();
+  if (params.account_id != null) search.set("account_id", String(params.account_id));
+  if (params.status) search.set("status", params.status);
+  if (params.start) search.set("start", params.start);
+  if (params.end) search.set("end", params.end);
+
+  return useQuery({
+    queryKey: ["logs", "ai-metrics", params],
+    queryFn: () => apiGet<AiMetrics>(`/api/logs/ai-metrics?${search.toString()}`),
     enabled,
     refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
   });

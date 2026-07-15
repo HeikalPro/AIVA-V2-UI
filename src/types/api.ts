@@ -437,8 +437,10 @@ export type AgentMetric = {
   avg_response_time: number | null;
   ai_usage_count: number | null;
   successful_answers: number | null;
+  failed_answers?: number | null;
   escalation_count: number | null;
   calculated_at?: string | null;
+  failure_reasons?: string | null;
 };
 
 export type LLMConfig = {
@@ -565,10 +567,12 @@ export type RagRetrievalList = {
 
 export type AiRequest = {
   id: number;
+  created_at?: string | null;
   session_id?: number | null;
   account_id?: number | null;
   account_name?: string | null;
   organization_id?: number | null;
+  user_email?: string | null;
   model_name?: string | null;
   provider?: string | null;
   input_tokens?: number | null;
@@ -585,4 +589,197 @@ export type AiRequestList = {
   items: AiRequest[];
   limit: number;
   offset: number;
+};
+
+export type AiTimeseriesPoint = {
+  day: string; // YYYY-MM-DD
+  calls: number;
+  avg_latency_ms?: number | null;
+  total_tokens: number;
+};
+
+export type ErrorLogRecord = {
+  id: number;
+  created_at?: string | null;
+  exception_type: string;
+  exception_message?: string | null;
+  stack_trace?: string | null;
+  source?: string | null;
+  http_method?: string | null;
+  path?: string | null;
+  route_template?: string | null;
+  status_code?: number | null;
+  request_id?: string | null;
+  user_id?: number | null;
+  user_email?: string | null;
+  org_id?: number | null;
+  client_ip?: string | null;
+};
+
+export type ErrorTypeCount = {
+  exception_type: string;
+  count: number;
+};
+
+export type ErrorLogList = {
+  items: ErrorLogRecord[];
+  type_counts: ErrorTypeCount[];
+  limit: number;
+  offset: number;
+};
+
+export type AiMetricsSummary = {
+  total_calls: number;
+  avg_latency_ms?: number | null;
+  min_latency_ms?: number | null;
+  max_latency_ms?: number | null;
+  total_tokens: number;
+  success_count: number;
+  failed_count: number;
+  success_rate?: number | null;
+  error_rate?: number | null;
+};
+
+export type AiMetricsBreakdownItem = {
+  model_name: string;
+  provider?: string | null;
+  count: number;
+  avg_latency_ms?: number | null;
+  min_latency_ms?: number | null;
+  max_latency_ms?: number | null;
+  total_tokens: number;
+  error_rate?: number | null;
+};
+
+export type AiMetrics = {
+  summary: AiMetricsSummary;
+  by_model: AiMetricsBreakdownItem[];
+};
+
+export type ComponentStatus = {
+  status: string; // up | down | not_configured | unknown
+  latency_ms?: number | null;
+  detail?: string | null;
+};
+
+export type RedisStatus = ComponentStatus & {
+  queue_name?: string | null;
+  queue_depth?: number | null;
+};
+
+export type ResourceStats = {
+  cpu_percent?: number | null;
+  memory_percent?: number | null;
+  memory_used_mb?: number | null;
+  memory_total_mb?: number | null;
+  detail?: string | null;
+};
+
+export type TrafficStats = {
+  window_minutes: number;
+  request_count?: number | null;
+  error_count?: number | null;
+  error_rate?: number | null;
+  requests_per_minute?: number | null;
+  avg_latency_ms?: number | null;
+};
+
+export type SystemHealth = {
+  status: string; // ok | degraded | down
+  generated_at: string;
+  database: ComponentStatus;
+  redis: RedisStatus;
+  resources: ResourceStats;
+  sse_connections: number;
+  traffic: TrafficStats;
+};
+
+export type PlatformInfo = {
+  app_name: string;
+  hostname?: string | null;
+  os?: string | null;
+  os_detail?: string | null;
+  python_version?: string | null;
+};
+
+export type CpuTimes = {
+  user?: number | null;
+  system?: number | null;
+  idle?: number | null;
+  iowait?: number | null;
+};
+
+export type CpuInfo = {
+  percent?: number | null;
+  cores?: number | null;
+  freq_mhz?: number | null;
+  per_core: (number | null)[];
+  times: CpuTimes;
+  load_avg?: number[] | null;
+};
+
+export type MemoryInfo = {
+  total_mb?: number | null;
+  used_mb?: number | null;
+  available_mb?: number | null;
+  percent?: number | null;
+  cached_mb?: number | null;
+  buffers_mb?: number | null;
+};
+
+export type SwapInfo = {
+  total_mb?: number | null;
+  used_mb?: number | null;
+  percent?: number | null;
+};
+
+export type DiskInfo = {
+  total_gb?: number | null;
+  used_gb?: number | null;
+  free_gb?: number | null;
+  percent?: number | null;
+};
+
+export type DiskIoInfo = {
+  read_mbps?: number | null;
+  write_mbps?: number | null;
+  read_iops?: number | null;
+  write_iops?: number | null;
+  read_total?: number | null;
+  write_total?: number | null;
+};
+
+export type NetworkInfo = {
+  sent_total_gb?: number | null;
+  recv_total_gb?: number | null;
+  packets_sent?: number | null;
+  packets_recv?: number | null;
+  errin?: number | null;
+  errout?: number | null;
+  dropin?: number | null;
+  dropout?: number | null;
+  sent_mbps?: number | null;
+  recv_mbps?: number | null;
+};
+
+export type ProcessInfo = {
+  pid?: number | null;
+  memory_mb?: number | null;
+  num_threads?: number | null;
+  cpu_percent?: number | null;
+};
+
+export type SystemResources = {
+  generated_at: string;
+  platform: PlatformInfo;
+  cpu: CpuInfo;
+  memory: MemoryInfo;
+  swap?: SwapInfo | null;
+  disk: DiskInfo;
+  disk_io: DiskIoInfo;
+  network: NetworkInfo;
+  process: ProcessInfo;
+  uptime_seconds?: number | null;
+  boot_time?: string | null;
+  detail?: string | null;
 };

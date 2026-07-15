@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
+  Activity,
   Briefcase,
   Building2,
   Bell,
@@ -40,6 +41,7 @@ const ICONS: Record<string, LucideIcon> = {
   Shield,
   ScrollText,
   UserCheck,
+  Activity,
 };
 
 function NavItem({
