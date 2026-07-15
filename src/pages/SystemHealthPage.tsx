@@ -1,5 +1,6 @@
 import { Activity } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { SystemComponentsSection } from "@/components/system/SystemComponentsSection";
 import { SystemResourcesSection } from "@/components/system/SystemResourcesSection";
 
 export function SystemHealthPage() {
@@ -8,9 +9,10 @@ export function SystemHealthPage() {
       <PageHeader
         icon={Activity}
         title="System Health"
-        description="Live host and backend-process resources — refreshes every 5s."
+        description="Dependency status and live host resources."
       />
 
+      <SystemComponentsSection />
       <SystemResourcesSection />
     </div>
   );

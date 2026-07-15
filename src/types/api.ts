@@ -694,6 +694,20 @@ export type SystemHealth = {
   traffic: TrafficStats;
 };
 
+export type ComponentHealth = {
+  key: string;
+  label: string;
+  status: string; // up | down | degraded | not_configured | unknown
+  latency_ms?: number | null;
+  detail?: string | null;
+  info?: string | null;
+};
+
+export type SystemComponents = {
+  generated_at: string;
+  components: ComponentHealth[];
+};
+
 export type PlatformInfo = {
   app_name: string;
   hostname?: string | null;
