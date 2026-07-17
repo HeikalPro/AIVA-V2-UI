@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { RefreshCw, ScrollText } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw, ScrollText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -7,6 +7,7 @@ import { useAgentMetrics } from "@/hooks/useAnalytics";
 import { useActivityLogs, useAiRequestLogs, useRagLogs, useSignInLogs } from "@/hooks/useLogs";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
+import { FailureReasonsPopover } from "@/components/logs/FailureReasonsPopover";
 import { AiMetricsPanel } from "@/components/logs/AiMetricsPanel";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
@@ -33,6 +34,45 @@ function snippet(text: string | null | undefined, max = 80): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max - 1)}…`;
+}
+
+/** Pretty-print when the value is valid JSON; fall back to the raw string when it isn't. */
+function formatJson(raw: string): { text: string; count: number | null } {
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      text: JSON.stringify(parsed, null, 2),
+      count: Array.isArray(parsed) ? parsed.length : null,
+    };
+  } catch {
+    return { text: raw, count: null };
+  }
+}
+
+function CollapsibleJsonValue({ value }: { value: string }) {
+  const [open, setOpen] = useState(false);
+  const { text, count } = useMemo(() => formatJson(value), [value]);
+  const label = count != null ? `${count} ${count === 1 ? "chunk" : "chunks"}` : `${text.length} characters`;
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-sm font-medium text-primary transition-colors hover:text-primary/80"
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span>{open ? "Hide" : "Show"}</span>
+        <span className="font-normal text-slate-500">({label})</span>
+      </button>
+      {open && (
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-900">
+          {text}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 function agentLabel(row: AgentMetric): string {
@@ -227,11 +267,9 @@ export function LogsPage() {
       render: (r) => {
         const n = r.failed_answers ?? 0;
         return (
-          <span
-            className={n > 0 ? "cursor-help font-semibold text-red-600 underline decoration-dotted underline-offset-2" : ""}
-            title={n > 0 ? r.failure_reasons ?? "Reasons unavailable" : undefined}
-          >
-            {String(r.failed_answers ?? "—")}
+          <span className="inline-flex items-center gap-1.5">
+            <span className={n > 0 ? "font-semibold text-red-600" : ""}>{String(r.failed_answers ?? "—")}</span>
+            {n > 0 && <FailureReasonsPopover reasons={r.failure_reasons} />}
           </span>
         );
       },
@@ -280,7 +318,11 @@ export function LogsPage() {
         {entries.map(({ key, value }) => (
           <div key={key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{key.replace(/_/g, " ")}</div>
-            <div className="whitespace-pre-wrap break-words text-sm text-slate-900">{String(value)}</div>
+            {key === "chunks_json" ? (
+              <CollapsibleJsonValue value={String(value)} />
+            ) : (
+              <div className="whitespace-pre-wrap break-words text-sm text-slate-900">{String(value)}</div>
+            )}
           </div>
         ))}
       </div>
