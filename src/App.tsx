@@ -21,9 +21,9 @@ import { ChatPage } from "@/pages/ChatPage";
 import { TicketsPage } from "@/pages/TicketsPage";
 import { IngestionPage } from "@/pages/IngestionPage";
 import { LogsPage } from "@/pages/LogsPage";
-import { SystemHealthPage } from "@/pages/SystemHealthPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
+import { WidgetDownloadPage } from "@/pages/WidgetDownloadPage";
 
 const ROUTE_PAGES: Record<string, ReactNode> = {
   "/": <DashboardPage />,
@@ -40,7 +40,7 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/tickets": <TicketsPage />,
   "/ingestion": <IngestionPage />,
   "/logs": <LogsPage />,
-  "/system": <SystemHealthPage />,
+  "/widget-download": <WidgetDownloadPage />,
 };
 
 export function App() {

@@ -495,6 +495,18 @@ export type MessageResponse = {
   message: string;
 };
 
+export type WidgetRelease = {
+  id: number;
+  version: string;
+  original_filename: string;
+  file_size: number;
+  content_type?: string | null;
+  notes?: string | null;
+  uploaded_by: number;
+  uploaded_by_email?: string | null;
+  uploaded_at?: string | null;
+};
+
 export type AuditLog = {
   id: number;
   created_at: string | null;

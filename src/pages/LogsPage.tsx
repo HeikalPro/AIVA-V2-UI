@@ -9,6 +9,8 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
 import { FailureReasonsPopover } from "@/components/logs/FailureReasonsPopover";
 import { AiMetricsPanel } from "@/components/logs/AiMetricsPanel";
+import { SystemComponentsSection } from "@/components/system/SystemComponentsSection";
+import { SystemResourcesSection } from "@/components/system/SystemResourcesSection";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
@@ -20,7 +22,7 @@ import { Select } from "@/components/ui/select";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AgentMetric, AiRequest, AuditLog, RagRetrieval, SignInLog } from "@/types/api";
 
-type TabId = "activity" | "sign-in" | "agents" | "rag" | "ai-requests" | "errors";
+type TabId = "activity" | "sign-in" | "agents" | "rag" | "ai-requests" | "errors" | "system";
 
 type LogRow = AuditLog | SignInLog | AgentMetric | RagRetrieval | AiRequest;
 
@@ -130,6 +132,7 @@ export function LogsPage() {
     { id: "rag", label: "RAG retrieval", show: canSeeAiLogs },
     { id: "ai-requests", label: "AI requests", show: canSeeAiLogs },
     { id: "errors", label: "Error logs", show: canSeeAiLogs },
+    { id: "system", label: "System health", show: isSuperAdmin || isDeveloper },
   ];
   const visibleTabs = tabs.filter((t) => t.show);
   const [tab, setTab] = useState<TabId>(visibleTabs[0]?.id ?? "activity");
@@ -336,8 +339,8 @@ export function LogsPage() {
     <div className="space-y-6">
       <PageHeader
         icon={ScrollText}
-        title="Logs"
-        description="Activity audit, sign-in security, agent usage, RAG retrievals, AI requests, and error diagnostics."
+        title="Logs / System health"
+        description="Activity audit, sign-in security, agent usage, RAG retrievals, AI requests, error diagnostics, and system health."
       />
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
@@ -581,6 +584,13 @@ export function LogsPage() {
       )}
 
       {tab === "errors" && <ErrorLogsPanel />}
+
+      {tab === "system" && (
+        <div className="space-y-6">
+          <SystemComponentsSection />
+          <SystemResourcesSection />
+        </div>
+      )}
 
       <Dialog open={selectedRow !== null} onOpenChange={(open) => !open && setSelectedRow(null)}>
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">

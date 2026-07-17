@@ -22,6 +22,7 @@ export type NavPermissionKey =
   | "tickets"
   | "ingestion"
   | "logs"
+  | "widget-download"
   | "system";
 
 export type NavItem = {
@@ -121,17 +122,24 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     path: "/logs",
-    label: "Logs",
+    label: "Logs / System health",
     icon: "ScrollText",
     permission: "logs",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
   },
   {
-    path: "/system",
-    label: "System Health",
-    icon: "Activity",
-    permission: "system",
-    roles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
+    path: "/widget-download",
+    label: "Widget Download",
+    icon: "Package",
+    permission: "widget-download",
+    roles: [
+      ROLES.SUPER_ADMIN,
+      ROLES.ORG_ADMIN,
+      ROLES.ACCOUNT_MANAGER,
+      ROLES.SUPERVISOR,
+      ROLES.AGENT,
+      ROLES.DEVELOPER,
+    ],
   },
 ];
 
