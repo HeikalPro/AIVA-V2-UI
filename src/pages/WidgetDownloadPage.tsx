@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Package, Trash2, Upload as UploadIcon } from "lucide-react";
+import { Download, Loader2, Package, Trash2, Upload as UploadIcon } from "lucide-react";
 import { formatUserError } from "@/lib/errors";
 import { apiDownload } from "@/lib/api-client";
 import { useWidgetRelease, useUploadWidgetRelease, useDeleteWidgetRelease } from "@/hooks/useWidgetRelease";
@@ -31,15 +31,22 @@ export function WidgetDownloadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function handleDownload() {
+    // Guard against re-entry: a second click while the ~80 MB fetch is in
+    // flight would spawn a competing download and slow both down.
+    if (downloading) return;
     setDownloadError(null);
+    setDownloading(true);
     try {
       await apiDownload("/api/widget-release/download", release?.original_filename || "aiva-widget.exe");
     } catch (e) {
       setDownloadError(formatUserError(e));
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -90,12 +97,26 @@ export function WidgetDownloadPage() {
               </p>
               {release.notes ? <p className="text-sm text-foreground/80">{release.notes}</p> : null}
             </div>
-            <Button onClick={handleDownload}>
-              <Download className="mr-2 h-4 w-4" /> Download latest
+            <Button onClick={handleDownload} disabled={downloading}>
+              {downloading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Preparing download…
+                </>
+              ) : (
+                <>
+                  <Download className="mr-2 h-4 w-4" /> Download latest
+                </>
+              )}
             </Button>
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">No widget has been uploaded yet.</p>
+        )}
+        {downloading && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Fetching the installer{release?.file_size ? ` (${fmtSize(release.file_size)})` : ""} — this can take a
+            minute on a slow connection. The save prompt appears once it finishes.
+          </p>
         )}
         {downloadError && <p className="mt-3 text-sm text-red-600">{downloadError}</p>}
       </div>
