@@ -23,7 +23,6 @@ import { IngestionPage } from "@/pages/IngestionPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
-import { WidgetDownloadPage } from "@/pages/WidgetDownloadPage";
 
 const ROUTE_PAGES: Record<string, ReactNode> = {
   "/": <DashboardPage />,
@@ -40,7 +39,6 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/tickets": <TicketsPage />,
   "/ingestion": <IngestionPage />,
   "/logs": <LogsPage />,
-  "/widget-download": <WidgetDownloadPage />,
 };
 
 export function App() {
