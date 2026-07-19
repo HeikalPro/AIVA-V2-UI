@@ -4,24 +4,31 @@ import { ApiError, formatUserError, parseApiDetail, readHttpErrorMessage } from 
 const ACCESS_KEY = "aiva_access_token";
 const REFRESH_KEY = "aiva_refresh_token";
 
+// One-time cleanup: earlier builds persisted tokens in localStorage (survived
+// browser close). Drop any leftovers so old sessions don't stay signed in.
+localStorage.removeItem(ACCESS_KEY);
+localStorage.removeItem(REFRESH_KEY);
+
 const baseUrl = () => import.meta.env.VITE_API_BASE_URL ?? "";
 
+// Tokens live in sessionStorage (not localStorage) so the session is cleared
+// when the browser is fully closed, forcing a fresh login on the next launch.
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY);
+  return sessionStorage.getItem(ACCESS_KEY);
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
+  return sessionStorage.getItem(REFRESH_KEY);
 }
 
 export function setTokens(tokens: TokenResponse): void {
-  localStorage.setItem(ACCESS_KEY, tokens.access_token);
-  localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+  sessionStorage.setItem(ACCESS_KEY, tokens.access_token);
+  sessionStorage.setItem(REFRESH_KEY, tokens.refresh_token);
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  sessionStorage.removeItem(ACCESS_KEY);
+  sessionStorage.removeItem(REFRESH_KEY);
 }
 
 let refreshPromise: Promise<boolean> | null = null;
