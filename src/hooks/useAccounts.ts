@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { Account, AccountCreate, AccountUpdate } from "@/types/api";
+import type { Account, AccountCreate, AccountUpdate, KbQueueGroup } from "@/types/api";
+
+/** KB queue buttons available for an account's corpus (widget-customization editor). */
+export function useAccountKbQueues(accountId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: ["accounts", accountId, "kb-queues"],
+    queryFn: () => apiGet<KbQueueGroup[]>(`/api/accounts/${accountId}/kb-queues`),
+    enabled: enabled && accountId != null,
+  });
+}
 
 export function useAccounts(organizationId?: number | null, enabled = true) {
   const params = organizationId ? `?organization_id=${organizationId}` : "";

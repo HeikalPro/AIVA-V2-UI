@@ -65,6 +65,7 @@ export type WidgetInstallmentCalculatorConfig = {
   products?: Record<
     string,
     {
+      label?: string | null;
       apr?: number | null;
       tenors?: number[] | null;
       flat_rates?: Record<string, number> | null;
@@ -72,8 +73,20 @@ export type WidgetInstallmentCalculatorConfig = {
   > | null;
 };
 
+export type WidgetKbQueuesConfig = {
+  /** Allow-list of KB queue keys to show in the widget; null/absent = show all. */
+  visible_keys?: string[] | null;
+};
+
 export type WidgetFeatures = {
   installment_calculator?: WidgetInstallmentCalculatorConfig;
+  kb_queues?: WidgetKbQueuesConfig | null;
+};
+
+/** One KB queue button available for an account (from GET /accounts/{id}/kb-queues). */
+export type KbQueueGroup = {
+  key: string;
+  label: string;
 };
 
 export type Account = {

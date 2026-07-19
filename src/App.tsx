@@ -12,6 +12,7 @@ import { ZohoCallbackPage } from "@/pages/ZohoCallbackPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { OrganizationsPage } from "@/pages/OrganizationsPage";
 import { AccountsPage } from "@/pages/AccountsPage";
+import { WidgetCustomizationPage } from "@/pages/WidgetCustomizationPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { RolesPage } from "@/pages/RolesPage";
 import { PromptsPage } from "@/pages/PromptsPage";
@@ -28,6 +29,7 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/": <DashboardPage />,
   "/organizations": <OrganizationsPage />,
   "/accounts": <AccountsPage />,
+  "/widget-customization": <WidgetCustomizationPage />,
   "/users": <UsersPage />,
   "/agents": <AgentsPage />,
   "/roles": <RolesPage />,

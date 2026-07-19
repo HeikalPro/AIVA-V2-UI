@@ -11,6 +11,7 @@ export type NavPermissionKey =
   | "dashboard"
   | "organizations"
   | "accounts"
+  | "widget-customization"
   | "users"
   | "agents"
   | "roles"
@@ -54,6 +55,13 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "Briefcase",
     permission: "accounts",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER],
+  },
+  {
+    path: "/widget-customization",
+    label: "Widget customization",
+    icon: "SlidersHorizontal",
+    permission: "widget-customization",
+    roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.DEVELOPER],
   },
   {
     path: "/users",

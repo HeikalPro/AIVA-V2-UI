@@ -26,10 +26,17 @@ export const DEFAULT_INSTANT_FLAT_RATES: Record<string, number> = {
 };
 
 export type CalculatorProductForm = {
+  /** Custom display name; empty string means "use the default label". */
+  label: string;
   aprPercent: string;
   tenors: number[];
   flatRatePercents: Record<string, string>;
 };
+
+/** Default display name for a product type (shown as placeholder when label is empty). */
+export function defaultCalculatorLabel(type: CalculatorTypeKey): string {
+  return CALCULATOR_TYPE_OPTIONS.find((o) => o.key === type)?.label ?? type;
+}
 
 export function defaultCalculatorProductForm(type: CalculatorTypeKey): CalculatorProductForm {
   const flatRatePercents: Record<string, string> = {};
@@ -38,6 +45,7 @@ export function defaultCalculatorProductForm(type: CalculatorTypeKey): Calculato
   }
   const apr = DEFAULT_APR_BY_TYPE[type];
   return {
+    label: "",
     aprPercent: apr != null ? String(Math.round(apr * 1000) / 10) : "",
     tenors: [...CALCULATOR_TENOR_OPTIONS],
     flatRatePercents,
@@ -66,12 +74,15 @@ function parseFlatRatePercent(raw: string): number | undefined {
 
 export function calculatorProductsFromAccount(
   _types: string[],
-  products: Record<string, { apr?: number | null; tenors?: number[] | null; flat_rates?: Record<string, number> | null }> | null | undefined,
+  products: Record<string, { label?: string | null; apr?: number | null; tenors?: number[] | null; flat_rates?: Record<string, number> | null }> | null | undefined,
 ): Record<CalculatorTypeKey, CalculatorProductForm> {
   const out = defaultCalculatorProductsForm();
   for (const type of ALL_CALCULATOR_TYPES) {
     const saved = products?.[type];
     if (!saved) continue;
+    if (typeof saved.label === "string" && saved.label.trim()) {
+      out[type].label = saved.label.trim();
+    }
     if (saved.apr != null && Number.isFinite(saved.apr)) {
       out[type].aprPercent = String(Math.round(saved.apr * 1000) / 10);
     }
@@ -95,13 +106,15 @@ export function calculatorProductsFromAccount(
 export function buildCalculatorProductsPayload(
   enabledTypes: string[],
   products: Record<CalculatorTypeKey, CalculatorProductForm>,
-): Record<string, { apr?: number; tenors: number[]; flat_rates?: Record<string, number> }> {
-  const out: Record<string, { apr?: number; tenors: number[]; flat_rates?: Record<string, number> }> = {};
+): Record<string, { label?: string; apr?: number; tenors: number[]; flat_rates?: Record<string, number> }> {
+  const out: Record<string, { label?: string; apr?: number; tenors: number[]; flat_rates?: Record<string, number> }> = {};
   for (const type of enabledTypes) {
     const key = type as CalculatorTypeKey;
     const form = products[key] ?? defaultCalculatorProductForm(key);
     const tenors = form.tenors.length > 0 ? form.tenors : [...CALCULATOR_TENOR_OPTIONS];
-    const entry: { apr?: number; tenors: number[]; flat_rates?: Record<string, number> } = { tenors };
+    const entry: { label?: string; apr?: number; tenors: number[]; flat_rates?: Record<string, number> } = { tenors };
+    const label = form.label.trim();
+    if (label) entry.label = label;
     const option = CALCULATOR_TYPE_OPTIONS.find((o) => o.key === key);
     if (option?.usesApr) {
       const apr = parseAprPercent(form.aprPercent);
