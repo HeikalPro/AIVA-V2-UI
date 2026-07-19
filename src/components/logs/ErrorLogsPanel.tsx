@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Send } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { TableFilters } from "@/components/shared/TableFilters";
@@ -11,10 +11,14 @@ import { formatUserError } from "@/lib/errors";
 import {
   SEVERITY_RANK,
   useErrorLogs,
+  useSendTestErrorAlert,
   type ErrorLogEntry,
   type ErrorSeverity,
   type ErrorSource,
 } from "@/hooks/useErrorLogs";
+import { useAuth } from "@/contexts/AuthContext";
+import { ROLES } from "@/lib/roles";
+import type { DeveloperNotify } from "@/types/api";
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return "—";
@@ -69,8 +73,31 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+const TEST_TONE: Record<DeveloperNotify["status"], string> = {
+  sent: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  no_recipients: "border-amber-200 bg-amber-50 text-amber-700",
+  disabled: "border-amber-200 bg-amber-50 text-amber-700",
+  failed: "border-red-200 bg-red-50 text-red-700",
+};
+
 export function ErrorLogsPanel() {
   const { entries, typeCounts, isLoading, isError, error, isFetching, refetch } = useErrorLogs(true);
+
+  const { user } = useAuth();
+  const canSendTest =
+    (user?.roles.includes(ROLES.SUPER_ADMIN) ?? false) || (user?.roles.includes(ROLES.ORG_ADMIN) ?? false);
+  const testAlert = useSendTestErrorAlert();
+  const [testResult, setTestResult] = useState<DeveloperNotify | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  function handleSendTest() {
+    setTestResult(null);
+    setTestError(null);
+    testAlert.mutate(undefined, {
+      onSuccess: (data) => setTestResult(data),
+      onError: (err) => setTestError(formatUserError(err)),
+    });
+  }
 
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("ALL");
@@ -127,12 +154,25 @@ export function ErrorLogsPanel() {
         </p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Auto-refreshes every 10s</span>
+          {canSendTest && (
+            <Button variant="outline" size="sm" onClick={handleSendTest} disabled={testAlert.isPending}>
+              <Send className={`mr-1.5 h-3.5 w-3.5 ${testAlert.isPending ? "animate-pulse" : ""}`} />
+              {testAlert.isPending ? "Sending…" : "Send test alert"}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
             Refresh
           </Button>
         </div>
       </div>
+
+      {testResult && (
+        <div className={`rounded-lg border px-3 py-2 text-sm ${TEST_TONE[testResult.status]}`}>
+          {testResult.message}
+        </div>
+      )}
+      <ErrorAlert message={testError} />
 
       <ErrorAlert message={isError ? formatUserError(error) : null} />
 

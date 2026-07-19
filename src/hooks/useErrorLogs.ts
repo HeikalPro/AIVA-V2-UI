@@ -1,6 +1,8 @@
 import { useMemo } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { apiPost } from "@/lib/api-client";
 import { useAiRequestLogs, useErrorEvents, useRagLogs } from "@/hooks/useLogs";
-import type { AiRequest, ErrorLogRecord, RagRetrieval } from "@/types/api";
+import type { AiRequest, DeveloperNotify, ErrorLogRecord, RagRetrieval } from "@/types/api";
 
 /**
  * Unified "Errors & Failures" stream.
@@ -118,6 +120,13 @@ function mapRagRetrieval(r: RagRetrieval): ErrorLogEntry {
 
 function recency(entry: ErrorLogEntry): number {
   return entry.when ? new Date(entry.when).getTime() : 0;
+}
+
+/** Fire a sample error alert email to admins + developers, to verify delivery. */
+export function useSendTestErrorAlert() {
+  return useMutation({
+    mutationFn: () => apiPost<DeveloperNotify>("/api/logs/errors/test"),
+  });
 }
 
 export function useErrorLogs(enabled = true) {
