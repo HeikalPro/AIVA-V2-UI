@@ -19,6 +19,7 @@ import {
   ScrollText,
   UserCheck,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -135,20 +136,28 @@ export function Layout() {
 
   return (
     <div className="flex h-dvh min-h-screen w-full overflow-hidden bg-background">
-      {sidebarOpen && isMobile && (
-        <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm lg:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
       <aside
         className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-slate-100 bg-white shadow-[1px_0_8px_rgba(0,0,0,0.04)] transition-all duration-300 ${
-          sidebarOpen ? "w-64" : "w-16"
-        } ${!sidebarOpen && isMobile ? "-translate-x-full" : "translate-x-0"}`}
+          isMobile
+            ? `w-full ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`
+            : `translate-x-0 ${sidebarOpen ? "w-64" : "w-16"}`
+        }`}
       >
         <div className={`flex h-16 shrink-0 items-center gap-3 ${sidebarOpen ? "px-5" : "justify-center"}`}>
           <Link to="/" className="shrink-0">
             <img src="/GoChat247_blue_transparent.png" alt="GoChat247" className="h-9 w-9 object-contain" />
           </Link>
           {sidebarOpen && <span className="truncate text-[15px] font-bold tracking-tight text-slate-800">AIVA</span>}
+          {isMobile && sidebarOpen && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              aria-label="Close menu"
+              className="ml-auto shrink-0 rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
         </div>
 
         {sidebarOpen && (
