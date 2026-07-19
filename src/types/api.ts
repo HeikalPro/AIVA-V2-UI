@@ -78,9 +78,17 @@ export type WidgetKbQueuesConfig = {
   visible_keys?: string[] | null;
 };
 
+export type WidgetBrandingConfig = {
+  title?: string | null;
+  subtitle?: string | null;
+  accent_color?: string | null;
+  logo_url?: string | null;
+};
+
 export type WidgetFeatures = {
   installment_calculator?: WidgetInstallmentCalculatorConfig;
   kb_queues?: WidgetKbQueuesConfig | null;
+  branding?: WidgetBrandingConfig | null;
 };
 
 /** One KB queue button available for an account (from GET /accounts/{id}/kb-queues). */

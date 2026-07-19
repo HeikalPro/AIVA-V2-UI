@@ -73,6 +73,37 @@ function computePreviewRows(
 const egp = (n: number) => n.toLocaleString("en-US");
 
 // ---------------------------------------------------------------------------
+// Accent color helpers for the live preview (mirror the widget's shade math).
+// ---------------------------------------------------------------------------
+const DEFAULT_ACCENT = "#0057a8";
+const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  let h = hex.replace("#", "").trim();
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6) return null;
+  const n = Number.parseInt(h, 16);
+  if (Number.isNaN(n)) return null;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function shade([r, g, b]: [number, number, number], target: number, amt: number): string {
+  const m = (c: number) => Math.round(c + (target - c) * amt);
+  return `rgb(${m(r)}, ${m(g)}, ${m(b)})`;
+}
+
+/** { base, dark, light } CSS colors for the preview, from an accent hex (or default). */
+function accentShades(accent: string) {
+  const rgb = hexToRgb(HEX_RE.test(accent) ? accent : DEFAULT_ACCENT) ?? [0, 87, 168];
+  return {
+    base: `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`,
+    dark: shade(rgb, 0, 0.28),
+    light: shade(rgb, 255, 0.14),
+    soft: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.1)`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Form helpers
 // ---------------------------------------------------------------------------
 function calculatorTypesFromAccount(acc: Account | null): CalculatorTypeKey[] {
@@ -91,11 +122,16 @@ type WidgetForm = {
   calcProducts: Record<CalculatorTypeKey, CalculatorProductForm>;
   kbOverride: boolean;
   kbVisibleKeys: string[];
+  brandTitle: string;
+  brandSubtitle: string;
+  brandAccent: string;
+  brandLogoUrl: string;
 };
 
 function formFromAccount(acc: Account | null): WidgetForm {
   const calc = acc?.widget_features?.installment_calculator;
   const kb = acc?.widget_features?.kb_queues;
+  const brand = acc?.widget_features?.branding;
   const kbOverride = kb != null && Array.isArray(kb.visible_keys);
   return {
     calcEnabled: calc?.enabled ?? false,
@@ -106,11 +142,22 @@ function formFromAccount(acc: Account | null): WidgetForm {
     ),
     kbOverride,
     kbVisibleKeys: kbOverride ? [...(kb!.visible_keys as string[])] : [],
+    brandTitle: brand?.title ?? "",
+    brandSubtitle: brand?.subtitle ?? "",
+    brandAccent: brand?.accent_color ?? "",
+    brandLogoUrl: brand?.logo_url ?? "",
   };
 }
 
 function buildWidgetFeatures(form: WidgetForm): WidgetFeatures {
   const activeTypes = form.calcEnabled ? form.calcTypes : [];
+  const branding = {
+    title: form.brandTitle.trim() || null,
+    subtitle: form.brandSubtitle.trim() || null,
+    accent_color: form.brandAccent.trim() || null,
+    logo_url: form.brandLogoUrl.trim() || null,
+  };
+  const hasBranding = Object.values(branding).some((v) => v != null);
   const wf: WidgetFeatures = {
     installment_calculator: {
       enabled: form.calcEnabled,
@@ -121,6 +168,8 @@ function buildWidgetFeatures(form: WidgetForm): WidgetFeatures {
     },
     // null clears the override (widget shows every allowed KB button).
     kb_queues: form.kbOverride ? { visible_keys: form.kbVisibleKeys } : null,
+    // null clears branding back to defaults.
+    branding: hasBranding ? branding : null,
   };
   return wf;
 }
@@ -204,6 +253,12 @@ export function WidgetCustomizationPage() {
   const productLabel = (key: CalculatorTypeKey) =>
     form.calcProducts[key]?.label.trim() || defaultCalculatorLabel(key);
 
+  // Branding preview values.
+  const accent = accentShades(form.brandAccent || DEFAULT_ACCENT);
+  const previewTitle = form.brandTitle.trim() || "GoChat247";
+  const previewSubtitle = form.brandSubtitle.trim() || "AI assistant";
+  const previewLogo = form.brandLogoUrl.trim();
+
   // Derived preview values (kept valid without extra effects).
   const enabledTypes = form.calcEnabled ? form.calcTypes : [];
   const activePreviewType =
@@ -255,6 +310,76 @@ export function WidgetCustomizationPage() {
           {/* ---------------- Controls ---------------- */}
           <div className="space-y-6">
             <ErrorAlert message={error} />
+
+            {/* Branding */}
+            <section className="rounded-xl border border-border bg-card p-5">
+              <div>
+                <span className="block text-sm font-semibold text-slate-800">Branding</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Header title, subtitle, accent color, and logo for this account's widget.
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs">Title</Label>
+                  <Input
+                    value={form.brandTitle}
+                    onChange={(e) => patch("brandTitle", e.target.value)}
+                    placeholder="GoChat247"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Subtitle</Label>
+                  <Input
+                    value={form.brandSubtitle}
+                    onChange={(e) => patch("brandSubtitle", e.target.value)}
+                    placeholder="AI assistant"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Accent color</Label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={HEX_RE.test(form.brandAccent) ? form.brandAccent : DEFAULT_ACCENT}
+                      onChange={(e) => patch("brandAccent", e.target.value)}
+                      className="h-9 w-10 shrink-0 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+                      aria-label="Accent color"
+                    />
+                    <Input
+                      value={form.brandAccent}
+                      onChange={(e) => patch("brandAccent", e.target.value)}
+                      placeholder="#0057A8"
+                      className="h-9"
+                    />
+                    {form.brandAccent && (
+                      <button
+                        type="button"
+                        onClick={() => patch("brandAccent", "")}
+                        className="shrink-0 text-xs text-muted-foreground hover:text-slate-700"
+                        title="Reset to default"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  {form.brandAccent !== "" && !HEX_RE.test(form.brandAccent) && (
+                    <p className="mt-1 text-[11px] text-amber-600">Enter a hex color like #0057A8.</p>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs">Logo URL</Label>
+                  <Input
+                    value={form.brandLogoUrl}
+                    onChange={(e) => patch("brandLogoUrl", e.target.value)}
+                    placeholder="https://…/logo.png"
+                    className="mt-1 h-9"
+                  />
+                </div>
+              </div>
+            </section>
 
             {/* Installment calculator */}
             <section className="rounded-xl border border-border bg-card p-5">
@@ -475,18 +600,25 @@ export function WidgetCustomizationPage() {
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Live preview</p>
             <div className="mx-auto flex h-[460px] w-full max-w-[360px] flex-col overflow-hidden rounded-2xl border-2 border-[#94a3b8] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.16),0_6px_16px_rgba(0,87,168,0.1)]">
               {/* gradient accent bar */}
-              <div className="h-1 shrink-0 bg-gradient-to-r from-[#003D75] via-[#0057A8] to-[#0066C0]" />
+              <div
+                className="h-1 shrink-0"
+                style={{ background: `linear-gradient(to right, ${accent.dark}, ${accent.base}, ${accent.light})` }}
+              />
 
               {/* header */}
               <header className="flex shrink-0 items-center gap-3 border-b border-[#cbd5e1] bg-white px-3.5 py-2.5">
                 <div className="flex min-w-0 flex-1 items-center gap-2.5">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-[#94a3b8] bg-white p-0.5">
-                    <img src="/GoChat247_blue_transparent.png" alt="" className="h-full w-full object-contain" />
+                    <img
+                      src={previewLogo || "/GoChat247_blue_transparent.png"}
+                      alt=""
+                      className="h-full w-full object-contain"
+                    />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold tracking-tight text-slate-900">GoChat247</p>
-                    <p className="truncate text-[10px] font-medium text-[#0057A8]">
-                      {selectedAccount.name} · AI assistant
+                    <p className="truncate text-sm font-semibold tracking-tight text-slate-900">{previewTitle}</p>
+                    <p className="truncate text-[10px] font-medium" style={{ color: accent.base }}>
+                      {selectedAccount.name} · {previewSubtitle}
                     </p>
                   </div>
                 </div>
@@ -496,9 +628,12 @@ export function WidgetCustomizationPage() {
                       type="button"
                       onClick={() => setPreviewCalcOpen((o) => !o)}
                       title={calcPanelOpen ? "Back to chat" : "Installment calculator"}
-                      className={`${headerIconBtn} ${
-                        calcPanelOpen ? "border-[#0057A8] bg-[#0057A8]/10 text-[#0057A8]" : ""
-                      }`}
+                      className={headerIconBtn}
+                      style={
+                        calcPanelOpen
+                          ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }
+                          : undefined
+                      }
                     >
                       <Calculator className="h-[18px] w-[18px]" />
                     </button>
@@ -527,7 +662,8 @@ export function WidgetCustomizationPage() {
                   {previewKbKeys.map((key) => (
                     <span
                       key={key}
-                      className="rounded-full border border-[#0057A8] bg-[#0057A8]/10 px-2.5 py-0.5 text-[11px] font-medium text-[#0057A8]"
+                      className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+                      style={{ borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }}
                     >
                       {kbLabel(key)}
                     </span>
@@ -560,11 +696,12 @@ export function WidgetCustomizationPage() {
                             key={key}
                             type="button"
                             onClick={() => setPreviewType(key)}
-                            className={`flex-1 rounded-lg border px-2 py-2 text-center text-[11px] font-medium leading-tight ${
+                            className="flex-1 rounded-lg border px-2 py-2 text-center text-[11px] font-medium leading-tight"
+                            style={
                               active
-                                ? "border-[#0057A8] bg-[#0057A8]/10 text-[#003D75]"
-                                : "border-slate-300 bg-white text-slate-600"
-                            }`}
+                                ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.dark }
+                                : { borderColor: "#cbd5e1", backgroundColor: "#fff", color: "#475569" }
+                            }
                           >
                             {productLabel(key)}
                           </button>
@@ -632,7 +769,11 @@ export function WidgetCustomizationPage() {
                   <div className="min-h-0 flex-1 overflow-y-auto bg-white px-3.5 py-3">
                     <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
                       <div className="mb-3 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border-2 border-[#94a3b8] bg-white p-1.5 shadow-sm">
-                        <img src="/GoChat247_blue_transparent.png" alt="" className="h-full w-full object-contain" />
+                        <img
+                          src={previewLogo || "/GoChat247_blue_transparent.png"}
+                          alt=""
+                          className="h-full w-full object-contain"
+                        />
                       </div>
                       <p className="text-sm font-medium text-slate-800">How can I help?</p>
                       <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-600">
@@ -645,7 +786,10 @@ export function WidgetCustomizationPage() {
                   <div className="shrink-0 border-t border-[#94a3b8] bg-white px-3 pb-3 pt-2.5">
                     <div className="flex items-end gap-2 rounded-2xl border border-slate-400 bg-white p-1.5 shadow-sm">
                       <span className="flex-1 px-2.5 py-2 text-sm text-slate-400">Ask anything…</span>
-                      <span className="mb-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#003D75] bg-[#0057A8] text-white">
+                      <span
+                        className="mb-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-white"
+                        style={{ borderColor: accent.dark, backgroundColor: accent.base }}
+                      >
                         <SendHorizontal className="h-4 w-4" />
                       </span>
                     </div>
