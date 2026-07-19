@@ -67,6 +67,7 @@ export function IngestionPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
+  const [accountFilter, setAccountFilter] = useState("ALL");
   const [submittedAt, setSubmittedAt] = useState(() => new Date().toLocaleString());
   const [form, setForm] = useState({
     account_id: "",
@@ -101,10 +102,16 @@ export function IngestionPage() {
         [
           (r) => statusFilter === "ALL" || r.status === statusFilter,
           (r) => orgFilter === "ALL" || String(r.organization_id) === orgFilter,
+          (r) => accountFilter === "ALL" || String(r.account_id) === accountFilter,
         ],
       ),
-    [data, search, statusFilter, orgFilter, organizationNameById],
+    [data, search, statusFilter, orgFilter, accountFilter, organizationNameById],
   );
+
+  const filterAccounts = useMemo(() => {
+    if (!isSuperAdmin || orgFilter === "ALL") return accounts;
+    return accounts.filter((a) => String(a.organization_id) === orgFilter);
+  }, [accounts, orgFilter, isSuperAdmin]);
 
   function openCreate() {
     setSubmittedAt(new Date().toLocaleString());
@@ -123,6 +130,7 @@ export function IngestionPage() {
     setSearch("");
     setStatusFilter("ALL");
     setOrgFilter("ALL");
+    setAccountFilter("ALL");
   }
 
   function openView(request: IngestionRequest) {
@@ -397,6 +405,16 @@ export function IngestionPage() {
               { value: "COMPLETED", label: "Completed" },
               { value: "FAILED", label: "Failed" },
               { value: "CANCELLED", label: "Cancelled" },
+            ],
+          },
+          {
+            id: "ingestion-account-filter",
+            label: "Account",
+            value: accountFilter,
+            onChange: setAccountFilter,
+            options: [
+              { value: "ALL", label: "All accounts" },
+              ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name })),
             ],
           },
         ]}

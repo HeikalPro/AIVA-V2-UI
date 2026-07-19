@@ -39,6 +39,7 @@ export function TicketsPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
+  const [accountFilter, setAccountFilter] = useState("ALL");
   const [form, setForm] = useState({
     organization_id: "",
     account_id: "",
@@ -81,10 +82,16 @@ export function TicketsPage() {
           (t) => statusFilter === "ALL" || t.status === statusFilter,
           (t) => typeFilter === "ALL" || t.ticket_type === typeFilter,
           (t) => orgFilter === "ALL" || String(t.organization_id) === orgFilter,
+          (t) => accountFilter === "ALL" || String(t.account_id) === accountFilter,
         ],
       ),
-    [data, search, statusFilter, typeFilter, orgFilter, organizationNameById, accountNameById],
+    [data, search, statusFilter, typeFilter, orgFilter, accountFilter, organizationNameById, accountNameById],
   );
+
+  const filterAccounts = useMemo(() => {
+    if (!isSuperAdmin || orgFilter === "ALL") return accounts;
+    return accounts.filter((a) => String(a.organization_id) === orgFilter);
+  }, [accounts, orgFilter, isSuperAdmin]);
 
   const createAccounts = useMemo(() => {
     if (!isSuperAdmin) return accounts;
@@ -166,6 +173,7 @@ export function TicketsPage() {
     setStatusFilter("ALL");
     setTypeFilter("ALL");
     setOrgFilter("ALL");
+    setAccountFilter("ALL");
   }
 
   return (
@@ -227,6 +235,16 @@ export function TicketsPage() {
             options: [
               { value: "ALL", label: "All types" },
               ...ticketTypeOptions.map((t) => ({ value: t, label: t })),
+            ],
+          },
+          {
+            id: "ticket-account-filter",
+            label: "Account",
+            value: accountFilter,
+            onChange: setAccountFilter,
+            options: [
+              { value: "ALL", label: "All accounts" },
+              ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name })),
             ],
           },
         ]}

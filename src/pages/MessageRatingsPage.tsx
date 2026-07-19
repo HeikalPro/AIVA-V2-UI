@@ -28,11 +28,29 @@ export function MessageRatingsPage() {
 
   const [search, setSearch] = useState("");
   const [ratingFilter, setRatingFilter] = useState("ALL");
+  const [accountFilter, setAccountFilter] = useState("ALL");
+
+  const accountOptions = useMemo(() => {
+    const byId = new Map<number, string>();
+    for (const r of data) {
+      if (!byId.has(r.account_id)) {
+        byId.set(r.account_id, r.account_name ?? `Account #${r.account_id}`);
+      }
+    }
+    return [
+      { value: "ALL", label: "All accounts" },
+      ...[...byId.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([id, name]) => ({ value: String(id), label: name })),
+    ];
+  }, [data]);
 
   const filtered = useMemo(
     () =>
       filterRows(
-        data.filter((r) => ratingFilter === "ALL" || r.rating === ratingFilter),
+        data
+          .filter((r) => ratingFilter === "ALL" || r.rating === ratingFilter)
+          .filter((r) => accountFilter === "ALL" || String(r.account_id) === accountFilter),
         search,
         (r) =>
           [
@@ -44,7 +62,7 @@ export function MessageRatingsPage() {
             r.feedback ?? "",
           ].join(" "),
       ),
-    [data, ratingFilter, search],
+    [data, ratingFilter, accountFilter, search],
   );
 
   const columns: Column<MessageRating>[] = [
@@ -139,8 +157,16 @@ export function MessageRatingsPage() {
         onClear={() => {
           setSearch("");
           setRatingFilter("ALL");
+          setAccountFilter("ALL");
         }}
         filters={[
+          {
+            id: "account",
+            label: "Account",
+            value: accountFilter,
+            onChange: setAccountFilter,
+            options: accountOptions,
+          },
           {
             id: "rating",
             label: "Rating",

@@ -44,6 +44,7 @@ export function AccountUpdatesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
+  const [accountFilter, setAccountFilter] = useState("ALL");
   const [form, setForm] = useState({
     account_id: "",
     title: "",
@@ -73,9 +74,10 @@ export function AccountUpdatesPage() {
         [
           (u) => statusFilter === "ALL" || (statusFilter === "ACTIVE" ? u.is_active : !u.is_active),
           (u) => orgFilter === "ALL" || String(u.organization_id) === orgFilter,
+          (u) => accountFilter === "ALL" || String(u.account_id) === accountFilter,
         ],
       ),
-    [data, search, statusFilter, orgFilter, accountNameById],
+    [data, search, statusFilter, orgFilter, accountFilter, accountNameById],
   );
 
   const createAccounts = useMemo(() => {
@@ -147,6 +149,7 @@ export function AccountUpdatesPage() {
     setSearch("");
     setStatusFilter("ALL");
     setOrgFilter("ALL");
+    setAccountFilter("ALL");
   }
 
   if (!canManage) {
@@ -201,6 +204,16 @@ export function AccountUpdatesPage() {
                 },
               ]
             : []),
+          {
+            id: "update-account-filter",
+            label: "Account",
+            value: accountFilter,
+            onChange: setAccountFilter,
+            options: [
+              { value: "ALL", label: "All accounts" },
+              ...createAccounts.map((a) => ({ value: String(a.id), label: a.name })),
+            ],
+          },
         ]}
         onClear={clearFilters}
         totalCount={data.length}
