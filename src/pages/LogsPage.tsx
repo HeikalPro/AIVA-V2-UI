@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
 import { FailureReasonsPopover } from "@/components/logs/FailureReasonsPopover";
 import { AiMetricsPanel } from "@/components/logs/AiMetricsPanel";
+import { ApiRequestsPanel } from "@/components/logs/ApiRequestsPanel";
 import { SystemComponentsSection } from "@/components/system/SystemComponentsSection";
 import { SystemResourcesSection } from "@/components/system/SystemResourcesSection";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -20,11 +21,11 @@ import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { AgentMetric, AiRequest, AuditLog, RagRetrieval, SignInLog } from "@/types/api";
+import type { AgentMetric, AiRequest, AuditLog, HttpRequestLog, RagRetrieval, SignInLog } from "@/types/api";
 
-type TabId = "activity" | "sign-in" | "agents" | "rag" | "ai-requests" | "errors" | "system";
+type TabId = "activity" | "sign-in" | "agents" | "api" | "rag" | "ai-requests" | "errors" | "system";
 
-type LogRow = AuditLog | SignInLog | AgentMetric | RagRetrieval | AiRequest;
+type LogRow = AuditLog | SignInLog | AgentMetric | RagRetrieval | AiRequest | HttpRequestLog;
 
 function formatWhen(value: string | null | undefined): string {
   if (!value) return "—";
@@ -129,6 +130,7 @@ export function LogsPage() {
     { id: "activity", label: "Activity", show: isSuperAdmin || isOrgAdmin || isSupervisor },
     { id: "sign-in", label: "Sign-in", show: isSuperAdmin || isOrgAdmin },
     { id: "agents", label: "Agent activity", show: isSuperAdmin || isOrgAdmin || isSupervisor || isAccountManager },
+    { id: "api", label: "API requests", show: canSeeAiLogs },
     { id: "rag", label: "RAG retrieval", show: canSeeAiLogs },
     { id: "ai-requests", label: "AI requests", show: canSeeAiLogs },
     { id: "errors", label: "Error logs", show: canSeeAiLogs },
@@ -340,7 +342,7 @@ export function LogsPage() {
       <PageHeader
         icon={ScrollText}
         title="Logs / System health"
-        description="Activity audit, sign-in security, agent usage, RAG retrievals, AI requests, error diagnostics, and system health."
+        description="Activity audit, sign-in security, agent usage, API traffic, RAG retrievals, AI requests, error diagnostics, and system health."
       />
 
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
@@ -508,6 +510,8 @@ export function LogsPage() {
           />
         </>
       )}
+
+      {tab === "api" && <ApiRequestsPanel onRowClick={(row) => setSelectedRow(row)} />}
 
       {tab === "rag" && (
         <>

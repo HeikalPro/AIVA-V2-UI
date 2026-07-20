@@ -21,6 +21,8 @@ type DataTableProps<T> = {
   emptyMessage?: string;
   onRowClick?: (row: T) => void;
   loading?: boolean;
+  /** Cap the table body height (CSS length) so long lists scroll in place instead of growing the page. */
+  maxHeight?: string;
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -40,6 +42,7 @@ export function DataTable<T>({
   emptyMessage = "No data",
   onRowClick,
   loading,
+  maxHeight,
 }: DataTableProps<T>) {
   const [sort, setSort] = useState<SortState>(null);
 
@@ -67,9 +70,10 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+    <div className="rounded-lg border border-slate-200 bg-white">
+      <div className="overflow-auto rounded-t-lg" style={maxHeight ? { maxHeight } : undefined}>
       <Table className="min-w-full">
-        <TableHeader>
+        <TableHeader className={maxHeight ? "sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(226_232_240)]" : ""}>
           <TableRow className="hover:bg-transparent">
             {columns.map((col) => {
               const isSorted = sort?.key === col.key;
@@ -131,6 +135,7 @@ export function DataTable<T>({
           )}
         </TableBody>
       </Table>
+      </div>
       {sortedData.length > 0 && (
         <div className="border-t border-slate-100 bg-slate-50/50 px-3 py-1.5">
           <p className="text-xs text-slate-400">

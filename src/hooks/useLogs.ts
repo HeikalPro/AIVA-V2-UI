@@ -6,6 +6,7 @@ import type {
   AuditLogList,
   ErrorLogList,
   HttpRequestLogList,
+  HttpRequestStats,
   RagRetrievalList,
   SignInLogList,
 } from "@/types/api";
@@ -71,6 +72,25 @@ export function useApiLogs(params: ApiLogParams = {}, enabled = true) {
     queryKey: ["logs", "api", params],
     queryFn: () => apiGet<HttpRequestLogList>(`/api/http-logs?${search.toString()}`),
     enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
+  });
+}
+
+type HttpLogStatsParams = {
+  start?: string;
+  end?: string;
+};
+
+export function useHttpLogStats(params: HttpLogStatsParams = {}, enabled = true) {
+  const search = new URLSearchParams();
+  if (params.start) search.set("start", params.start);
+  if (params.end) search.set("end", params.end);
+
+  return useQuery({
+    queryKey: ["logs", "api-stats", params],
+    queryFn: () => apiGet<HttpRequestStats>(`/api/http-logs/stats?${search.toString()}`),
+    enabled,
+    refetchInterval: enabled ? LIVE_LOG_REFETCH_MS : false,
   });
 }
 

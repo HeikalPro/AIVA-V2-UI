@@ -580,6 +580,44 @@ export type HttpRequestLogList = {
   offset: number;
 };
 
+export type HttpRequestStatsSummary = {
+  total_requests: number;
+  unique_users: number;
+  unique_endpoints: number;
+  avg_duration_ms?: number | null;
+  max_duration_ms?: number | null;
+  error_count: number;
+  error_rate?: number | null;
+};
+
+export type HttpEndpointStat = {
+  http_method: string;
+  endpoint: string;
+  handler_name?: string | null;
+  count: number;
+  unique_users: number;
+  avg_duration_ms?: number | null;
+  max_duration_ms?: number | null;
+  error_count: number;
+  error_rate?: number | null;
+  last_called_at?: string | null;
+};
+
+export type HttpUserStat = {
+  actor: string;
+  user_id?: number | null;
+  count: number;
+  unique_endpoints: number;
+  error_count: number;
+  last_seen_at?: string | null;
+};
+
+export type HttpRequestStats = {
+  summary: HttpRequestStatsSummary;
+  by_endpoint: HttpEndpointStat[];
+  by_user: HttpUserStat[];
+};
+
 export type RagRetrieval = {
   id: number;
   created_at?: string | null;
