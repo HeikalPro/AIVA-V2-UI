@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Calculator, Check, LogOut, Minus, SendHorizontal, SlidersHorizontal, SquarePen, X } from "lucide-react";
+import { Calculator, Check, LogOut, MapPin, Minus, Phone, Plus, SendHorizontal, SlidersHorizontal, SquarePen, Trash2, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
 import { formatUserError } from "@/lib/errors";
@@ -20,7 +20,7 @@ import {
   type CalculatorProductForm,
   type CalculatorTypeKey,
 } from "@/lib/calculatorDefaults";
-import type { Account, KbQueueGroup, WidgetFeatures } from "@/types/api";
+import type { Account, KbQueueGroup, WidgetFeatures, WidgetLocationItem } from "@/types/api";
 
 // ---------------------------------------------------------------------------
 // Preview-only installment math — mirrors AIVA-widget/utils/installmentCalculator.ts
@@ -116,6 +116,30 @@ function calculatorTypesFromAccount(acc: Account | null): CalculatorTypeKey[] {
   return [...ALL_CALCULATOR_TYPES];
 }
 
+type LocationForm = {
+  name: string;
+  area: string;
+  address: string;
+  phone: string;
+  hours: string;
+  mapsUrl: string;
+};
+
+const EMPTY_LOCATION: LocationForm = { name: "", area: "", address: "", phone: "", hours: "", mapsUrl: "" };
+
+function locationsFromAccount(acc: Account | null): LocationForm[] {
+  const items = acc?.widget_features?.locations?.items;
+  if (!Array.isArray(items)) return [];
+  return items.map((it) => ({
+    name: it.name ?? "",
+    area: it.area ?? "",
+    address: it.address ?? "",
+    phone: it.phone ?? "",
+    hours: it.hours ?? "",
+    mapsUrl: it.maps_url ?? "",
+  }));
+}
+
 type WidgetForm = {
   calcEnabled: boolean;
   calcTypes: CalculatorTypeKey[];
@@ -126,6 +150,8 @@ type WidgetForm = {
   brandSubtitle: string;
   brandAccent: string;
   brandLogoUrl: string;
+  locEnabled: boolean;
+  locations: LocationForm[];
 };
 
 function formFromAccount(acc: Account | null): WidgetForm {
@@ -146,6 +172,8 @@ function formFromAccount(acc: Account | null): WidgetForm {
     brandSubtitle: brand?.subtitle ?? "",
     brandAccent: brand?.accent_color ?? "",
     brandLogoUrl: brand?.logo_url ?? "",
+    locEnabled: acc?.widget_features?.locations?.enabled ?? false,
+    locations: locationsFromAccount(acc),
   };
 }
 
@@ -158,6 +186,16 @@ function buildWidgetFeatures(form: WidgetForm): WidgetFeatures {
     logo_url: form.brandLogoUrl.trim() || null,
   };
   const hasBranding = Object.values(branding).some((v) => v != null);
+  const locationItems: WidgetLocationItem[] = form.locations
+    .filter((l) => l.name.trim())
+    .map((l) => ({
+      name: l.name.trim(),
+      area: l.area.trim() || null,
+      address: l.address.trim() || null,
+      phone: l.phone.trim() || null,
+      hours: l.hours.trim() || null,
+      maps_url: l.mapsUrl.trim() || null,
+    }));
   const wf: WidgetFeatures = {
     installment_calculator: {
       enabled: form.calcEnabled,
@@ -170,6 +208,11 @@ function buildWidgetFeatures(form: WidgetForm): WidgetFeatures {
     kb_queues: form.kbOverride ? { visible_keys: form.kbVisibleKeys } : null,
     // null clears branding back to defaults.
     branding: hasBranding ? branding : null,
+    // null clears the section entirely when it's off and empty.
+    locations:
+      form.locEnabled || locationItems.length > 0
+        ? { enabled: form.locEnabled, items: locationItems }
+        : null,
   };
   return wf;
 }
@@ -198,8 +241,9 @@ export function WidgetCustomizationPage() {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
-  // Preview mirrors the real widget: the calculator button opens the panel.
+  // Preview mirrors the real widget: the calculator/locations buttons open panels.
   const [previewCalcOpen, setPreviewCalcOpen] = useState(false);
+  const [previewLocOpen, setPreviewLocOpen] = useState(false);
   const [previewPrincipal, setPreviewPrincipal] = useState("10000");
   const [previewType, setPreviewType] = useState<CalculatorTypeKey | null>(null);
 
@@ -214,6 +258,7 @@ export function WidgetCustomizationPage() {
     setError(null);
     setSavedAt(null);
     setPreviewCalcOpen(false);
+    setPreviewLocOpen(false);
     setPreviewPrincipal("10000");
   }, [selectedAccount]);
 
@@ -224,6 +269,13 @@ export function WidgetCustomizationPage() {
     setForm((f) => ({
       ...f,
       calcProducts: { ...f.calcProducts, [typeKey]: next },
+    }));
+  }
+
+  function setLocation(index: number, next: LocationForm) {
+    setForm((f) => ({
+      ...f,
+      locations: f.locations.map((l, i) => (i === index ? next : l)),
     }));
   }
 
@@ -265,6 +317,8 @@ export function WidgetCustomizationPage() {
     previewType && enabledTypes.includes(previewType) ? previewType : enabledTypes[0] ?? null;
   const activePreviewOption = CALCULATOR_TYPE_OPTIONS.find((o) => o.key === activePreviewType);
   const calcPanelOpen = previewCalcOpen && form.calcEnabled;
+  const previewLocations = form.locations.filter((l) => l.name.trim());
+  const locPanelOpen = previewLocOpen && form.locEnabled && !calcPanelOpen;
   const principalValue = parsePercent(previewPrincipal);
   const previewRows =
     calcPanelOpen && activePreviewOption && principalValue != null
@@ -583,6 +637,130 @@ export function WidgetCustomizationPage() {
               )}
             </section>
 
+            {/* Locations */}
+            <section className="rounded-xl border border-border bg-card p-5">
+              <label className="flex cursor-pointer items-start justify-between gap-3">
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Locations</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Shows a branches/locations button in the widget listing this account's addresses.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={form.locEnabled}
+                  onChange={(e) => patch("locEnabled", e.target.checked)}
+                  className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300"
+                />
+              </label>
+
+              {form.locEnabled && (
+                <div className="mt-4 space-y-3">
+                  {form.locations.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No locations yet — add the first branch below.
+                    </p>
+                  )}
+                  {form.locations.map((loc, i) => (
+                    <div key={i} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          Location {i + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            patch(
+                              "locations",
+                              form.locations.filter((_, idx) => idx !== i),
+                            )
+                          }
+                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-rose-600"
+                          title="Remove location"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Remove
+                        </button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <Label className="text-xs">Name *</Label>
+                          <Input
+                            value={loc.name}
+                            dir="auto"
+                            onChange={(e) => setLocation(i, { ...loc, name: e.target.value })}
+                            placeholder="Main branch"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Area / district</Label>
+                          <Input
+                            value={loc.area}
+                            dir="auto"
+                            onChange={(e) => setLocation(i, { ...loc, area: e.target.value })}
+                            placeholder="Maadi"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <Label className="text-xs">Address</Label>
+                          <Input
+                            value={loc.address}
+                            dir="auto"
+                            onChange={(e) => setLocation(i, { ...loc, address: e.target.value })}
+                            placeholder="Street, building, nearby landmark…"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Phone / hotline</Label>
+                          <Input
+                            value={loc.phone}
+                            dir="auto"
+                            onChange={(e) => setLocation(i, { ...loc, phone: e.target.value })}
+                            placeholder="16134"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Working hours</Label>
+                          <Input
+                            value={loc.hours}
+                            dir="auto"
+                            onChange={(e) => setLocation(i, { ...loc, hours: e.target.value })}
+                            placeholder="Sat–Thu 9am–5pm"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <Label className="text-xs">Google Maps URL</Label>
+                          <Input
+                            value={loc.mapsUrl}
+                            onChange={(e) => setLocation(i, { ...loc, mapsUrl: e.target.value })}
+                            placeholder="https://maps.google.com/…"
+                            className="mt-1 h-9"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => patch("locations", [...form.locations, { ...EMPTY_LOCATION }])}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Add location
+                  </Button>
+                  {form.locEnabled && form.locations.every((l) => !l.name.trim()) && form.locations.length > 0 && (
+                    <p className="text-xs text-amber-600">
+                      Locations need at least a name to be saved and shown.
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+
             <div className="flex items-center gap-3">
               <Button onClick={handleSave} disabled={updateAccount.isPending}>
                 {updateAccount.isPending ? "Saving…" : "Save changes"}
@@ -626,7 +804,10 @@ export function WidgetCustomizationPage() {
                   {form.calcEnabled && (
                     <button
                       type="button"
-                      onClick={() => setPreviewCalcOpen((o) => !o)}
+                      onClick={() => {
+                        setPreviewCalcOpen((o) => !o);
+                        setPreviewLocOpen(false);
+                      }}
                       title={calcPanelOpen ? "Back to chat" : "Installment calculator"}
                       className={headerIconBtn}
                       style={
@@ -636,6 +817,24 @@ export function WidgetCustomizationPage() {
                       }
                     >
                       <Calculator className="h-[18px] w-[18px]" />
+                    </button>
+                  )}
+                  {form.locEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewLocOpen((o) => !o);
+                        setPreviewCalcOpen(false);
+                      }}
+                      title={locPanelOpen ? "Back to chat" : "Locations"}
+                      className={headerIconBtn}
+                      style={
+                        locPanelOpen
+                          ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }
+                          : undefined
+                      }
+                    >
+                      <MapPin className="h-[18px] w-[18px]" />
                     </button>
                   )}
                   <span className={headerIconBtn}>
@@ -761,6 +960,76 @@ export function WidgetCustomizationPage() {
                     <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
                       تقريبياً — share amounts as approximate with the customer.
                     </p>
+                  </div>
+                </div>
+              ) : locPanelOpen ? (
+                /* locations panel */
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="shrink-0 border-b border-[#94a3b8] px-3.5 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">Our locations</p>
+                        <p className="text-[10px] text-slate-500">
+                          {previewLocations.length} branch{previewLocations.length === 1 ? "" : "es"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewLocOpen(false)}
+                        className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-[#0057A8] hover:text-[#0057A8]"
+                      >
+                        Back to chat
+                      </button>
+                    </div>
+                  </div>
+                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3.5 py-3">
+                    {previewLocations.length === 0 && (
+                      <p className="py-8 text-center text-xs text-slate-500">
+                        No locations added yet.
+                      </p>
+                    )}
+                    {previewLocations.map((loc, i) => (
+                      <div key={i} className="rounded-xl border border-slate-300 bg-white p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <p dir="auto" className="text-sm font-semibold text-slate-900">
+                            {loc.name}
+                          </p>
+                          {loc.area.trim() && (
+                            <span
+                              dir="auto"
+                              className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                              style={{ borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }}
+                            >
+                              {loc.area}
+                            </span>
+                          )}
+                        </div>
+                        {loc.address.trim() && (
+                          <p dir="auto" className="mt-1 text-xs leading-relaxed text-slate-600">
+                            {loc.address}
+                          </p>
+                        )}
+                        {(loc.phone.trim() || loc.hours.trim()) && (
+                          <p dir="auto" className="mt-1 text-[11px] text-slate-500">
+                            {[loc.phone.trim(), loc.hours.trim()].filter(Boolean).join(" · ")}
+                          </p>
+                        )}
+                        {loc.mapsUrl.trim() && (
+                          <span
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium"
+                            style={{ color: accent.base }}
+                          >
+                            <MapPin className="h-3 w-3" /> Open in Maps
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {previewLocations.some((l) => l.phone.trim()) && (
+                      <p className="pt-1 text-center text-[10px] text-slate-500">
+                        <Phone className="mr-1 inline h-3 w-3" />
+                        Call the hotline to find your nearest branch.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (

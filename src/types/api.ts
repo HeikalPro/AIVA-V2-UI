@@ -85,10 +85,25 @@ export type WidgetBrandingConfig = {
   logo_url?: string | null;
 };
 
+export type WidgetLocationItem = {
+  name: string;
+  area?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  hours?: string | null;
+  maps_url?: string | null;
+};
+
+export type WidgetLocationsConfig = {
+  enabled: boolean;
+  items: WidgetLocationItem[];
+};
+
 export type WidgetFeatures = {
   installment_calculator?: WidgetInstallmentCalculatorConfig;
   kb_queues?: WidgetKbQueuesConfig | null;
   branding?: WidgetBrandingConfig | null;
+  locations?: WidgetLocationsConfig | null;
 };
 
 /** One KB queue button available for an account (from GET /accounts/{id}/kb-queues). */
