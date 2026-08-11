@@ -11,9 +11,11 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  Moon,
   Package,
   Shield,
   SlidersHorizontal,
+  Sun,
   ThumbsUp,
   Ticket,
   Upload,
@@ -24,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { NAV_ITEMS, ROLES, canAccessNav, displayRole } from "@/lib/roles";
 import { useIngestionPendingCount } from "@/hooks/useIngestion";
 import { useTicketOpenCount } from "@/hooks/useTickets";
@@ -107,6 +110,7 @@ function NavItem({
 
 export function Layout() {
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
   const { data: ticketOpenBadge } = useTicketOpenCount(isSuperAdmin);
   const { data: ingestionPendingBadge } = useIngestionPendingCount(isSuperAdmin);
@@ -227,6 +231,15 @@ export function Layout() {
             <p className="truncate text-sm font-semibold text-slate-800">{currentPage?.label ?? "AIVA"}</p>
             <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
         </header>
 
         <main className="flex-1 overflow-y-auto overflow-x-hidden pt-16">

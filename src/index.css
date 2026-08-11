@@ -25,6 +25,27 @@
     --radius: 0.5rem;
   }
 
+  .dark {
+    --background: 215 28% 9%;
+    --foreground: 210 17% 90%;
+    --card: 215 25% 12%;
+    --card-foreground: 210 17% 90%;
+    --primary: 204 100% 45%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 204 100% 52%;
+    --secondary: 215 20% 17%;
+    --secondary-foreground: 210 15% 85%;
+    --muted: 215 20% 16%;
+    --muted-foreground: 215 12% 63%;
+    --accent: 204 60% 18%;
+    --accent-foreground: 204 85% 70%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 16% 22%;
+    --input: 215 16% 20%;
+    --ring: 204 100% 45%;
+  }
+
   * {
     @apply border-border;
   }
@@ -76,4 +97,279 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/*
+ * Dark mode remaps.
+ * Pages use hardcoded white/slate utility classes; rather than adding dark:
+ * variants across every file, remap them centrally when .dark is active.
+ * Selectors (.dark .cls) outrank the single-class utilities they override.
+ */
+
+/* --- surfaces --- */
+.dark .bg-white {
+  background-color: hsl(var(--card));
+}
+.dark .bg-white\/60 {
+  background-color: hsl(var(--card) / 0.6);
+}
+.dark .bg-slate-50 {
+  background-color: hsl(215 22% 14%);
+}
+.dark .bg-slate-50\/50 {
+  background-color: hsl(215 22% 14% / 0.5);
+}
+.dark .bg-slate-50\/80 {
+  background-color: hsl(215 22% 14% / 0.8);
+}
+.dark .bg-slate-100 {
+  background-color: hsl(215 19% 18%);
+}
+.dark .bg-slate-200 {
+  background-color: hsl(215 17% 23%);
+}
+.dark .bg-slate-200\/70 {
+  background-color: hsl(215 17% 23% / 0.7);
+}
+
+/* --- slate text --- */
+.dark .text-slate-900 {
+  color: hsl(210 20% 95%);
+}
+.dark .text-slate-800 {
+  color: hsl(210 17% 88%);
+}
+.dark .text-slate-700 {
+  color: hsl(213 15% 80%);
+}
+.dark .text-slate-600 {
+  color: hsl(214 13% 70%);
+}
+.dark .text-slate-500 {
+  color: hsl(215 12% 62%);
+}
+.dark .text-slate-400,
+.dark .placeholder\:text-slate-400::placeholder {
+  color: hsl(215 11% 52%);
+}
+
+/* --- borders / rings / shadows --- */
+.dark .border-slate-100 {
+  border-color: hsl(215 17% 18%);
+}
+.dark .border-slate-200 {
+  border-color: hsl(var(--border));
+}
+.dark .border-slate-300 {
+  border-color: hsl(215 15% 28%);
+}
+.dark .border-slate-400,
+.dark .border-\[\#94a3b8\] {
+  border-color: hsl(215 14% 34%);
+}
+.dark .border-\[\#cbd5e1\] {
+  border-color: hsl(215 15% 28%);
+}
+.dark .shadow-slate-200\/60 {
+  --tw-shadow-color: rgb(0 0 0 / 0.45);
+}
+
+/* --- state variants (after base remaps so they win on interaction) --- */
+.dark .focus\:bg-white:focus,
+.dark .hover\:bg-white:hover,
+.dark .odd\:bg-white:nth-child(odd),
+.dark .focus-within\:bg-white:focus-within {
+  background-color: hsl(var(--card));
+}
+.dark .hover\:bg-slate-50:hover,
+.dark .group:hover .group-hover\:bg-slate-50 {
+  background-color: hsl(215 22% 14%);
+}
+.dark .even\:bg-slate-50\/60:nth-child(even) {
+  background-color: hsl(215 22% 14% / 0.6);
+}
+.dark .hover\:bg-slate-100:hover,
+.dark .group:hover .group-hover\:bg-slate-100 {
+  background-color: hsl(215 19% 18%);
+}
+.dark .hover\:text-slate-900:hover {
+  color: hsl(210 20% 95%);
+}
+.dark .hover\:text-slate-800:hover {
+  color: hsl(210 17% 88%);
+}
+.dark .hover\:text-slate-700:hover,
+.dark .group:hover .group-hover\:text-slate-700 {
+  color: hsl(213 15% 80%);
+}
+.dark .hover\:text-slate-600:hover {
+  color: hsl(214 13% 70%);
+}
+.dark .hover\:border-slate-300:hover,
+.dark .focus-within\:border-slate-300:focus-within {
+  border-color: hsl(215 15% 28%);
+}
+.dark .focus-within\:ring-slate-200:focus-within {
+  --tw-ring-color: hsl(215 15% 30%);
+}
+
+/* --- brand hex classes --- */
+.dark .text-\[\#004080\],
+.dark .text-\[\#0057A8\] {
+  color: hsl(var(--primary));
+}
+.dark .text-\[\#00263E\] {
+  color: hsl(var(--foreground));
+}
+.dark .border-\[\#004080\],
+.dark .border-\[\#0057A8\] {
+  border-color: hsl(var(--primary));
+}
+
+/* --- accent tints (badges, alerts, status chips) --- */
+.dark .bg-red-50 {
+  background-color: rgb(239 68 68 / 0.1);
+}
+.dark .bg-red-50\/60 {
+  background-color: rgb(239 68 68 / 0.06);
+}
+.dark .bg-red-100 {
+  background-color: rgb(239 68 68 / 0.17);
+}
+.dark .bg-amber-50 {
+  background-color: rgb(245 158 11 / 0.1);
+}
+.dark .bg-amber-100 {
+  background-color: rgb(245 158 11 / 0.17);
+}
+.dark .bg-green-50 {
+  background-color: rgb(34 197 94 / 0.1);
+}
+.dark .bg-emerald-50 {
+  background-color: rgb(16 185 129 / 0.1);
+}
+.dark .bg-emerald-100 {
+  background-color: rgb(16 185 129 / 0.17);
+}
+.dark .bg-sky-100 {
+  background-color: rgb(14 165 233 / 0.17);
+}
+.dark .bg-violet-100 {
+  background-color: rgb(139 92 246 / 0.17);
+}
+.dark .bg-rose-100 {
+  background-color: rgb(244 63 94 / 0.17);
+}
+.dark .bg-rose-200 {
+  background-color: rgb(244 63 94 / 0.25);
+}
+.dark .bg-blue-100 {
+  background-color: rgb(59 130 246 / 0.17);
+}
+.dark .border-red-200 {
+  border-color: rgb(239 68 68 / 0.35);
+}
+.dark .border-red-300 {
+  border-color: rgb(239 68 68 / 0.45);
+}
+.dark .border-amber-200 {
+  border-color: rgb(245 158 11 / 0.35);
+}
+.dark .border-amber-300 {
+  border-color: rgb(245 158 11 / 0.45);
+}
+.dark .border-green-200 {
+  border-color: rgb(34 197 94 / 0.35);
+}
+.dark .border-emerald-200 {
+  border-color: rgb(16 185 129 / 0.35);
+}
+
+/* --- accent text: dark shades flip to light shades --- */
+.dark .text-red-900,
+.dark .text-red-800,
+.dark .text-red-700 {
+  color: #fca5a5;
+}
+.dark .text-red-600,
+.dark .hover\:text-red-600:hover {
+  color: #f87171;
+}
+.dark .text-amber-900,
+.dark .text-amber-800,
+.dark .text-amber-700 {
+  color: #fcd34d;
+}
+.dark .text-amber-600 {
+  color: #fbbf24;
+}
+.dark .text-green-800 {
+  color: #86efac;
+}
+.dark .text-emerald-800,
+.dark .text-emerald-700 {
+  color: #6ee7b7;
+}
+.dark .text-emerald-600 {
+  color: #34d399;
+}
+.dark .text-sky-700 {
+  color: #7dd3fc;
+}
+.dark .text-sky-600 {
+  color: #38bdf8;
+}
+.dark .text-violet-700 {
+  color: #c4b5fd;
+}
+.dark .text-violet-600 {
+  color: #a78bfa;
+}
+.dark .text-rose-800,
+.dark .text-rose-700 {
+  color: #fda4af;
+}
+.dark .text-rose-600,
+.dark .hover\:text-rose-600:hover {
+  color: #fb7185;
+}
+.dark .text-blue-600 {
+  color: #60a5fa;
+}
+
+/* --- component-level rules defined in this file --- */
+.dark .card-goai {
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--border));
+}
+
+/* --- scrollbars --- */
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* --- recharts (colors are set as SVG/inline attributes) --- */
+.dark .recharts-cartesian-grid line {
+  stroke: #334155;
+}
+.dark .recharts-cartesian-axis line {
+  stroke: #475569;
+}
+.dark .recharts-text {
+  fill: #94a3b8;
+}
+.dark .recharts-tooltip-cursor {
+  stroke: #475569;
+  fill: rgb(148 163 184 / 0.1);
+}
+.dark .recharts-default-tooltip {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0;
 }
