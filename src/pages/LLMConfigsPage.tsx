@@ -12,6 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import type { LLMConfig, ModelCatalogItem } from "@/types/api";
 
+/** All chat traffic goes through the SovereignEG gateway; prefill it on new configs
+ *  so a blank base URL never silently falls back to official OpenAI.
+ *  Mirrors _DEFAULT_BASE in backend/services/sovereign_catalog.py. */
+const DEFAULT_API_BASE_URL = "https://backend.sovereigneg.com/v1";
+
 function fmtEgp(n?: number | null): string {
   if (n == null) return "—";
   return `E£${n.toLocaleString("en", { maximumFractionDigits: 2 })}`;
@@ -63,7 +68,7 @@ export function LLMConfigsPage() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ provider: "openai", model_name: "", comment: "", api_base_url: "", temperature: "0.7", max_tokens: "4096", embedding_model: "", reranker_model: "", is_active: true });
+    setForm({ provider: "OpenAI", model_name: "", comment: "", api_base_url: DEFAULT_API_BASE_URL, temperature: "0.7", max_tokens: "4096", embedding_model: "", reranker_model: "", is_active: true });
     setError(null);
     setDialogOpen(true);
   }
