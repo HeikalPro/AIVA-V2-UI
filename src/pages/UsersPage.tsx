@@ -197,6 +197,9 @@ export function UsersPage() {
         body: { account_id: Number(addAccountId) },
       });
       setEditing(updated);
+      // Assigning a cross-org account moves the user into that account's organization.
+      // Resync the form so handleSave does not see a phantom org change and revert it.
+      setForm((f) => ({ ...f, organization_id: String(updated.organization_id) }));
       setAddAccountId("");
     } catch (e) {
       setError(formatUserError(e));
