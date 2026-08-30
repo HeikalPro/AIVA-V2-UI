@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { ROLES } from "@/lib/roles";
+import { canAccessPermission } from "@/lib/roles";
 import { useMessageRatings } from "@/hooks/useMessageRatings";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
@@ -23,8 +23,8 @@ function snippet(text: string, max = 120): string {
 
 export function MessageRatingsPage() {
   const { user } = useAuth();
-  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
-  const { data = [], isLoading } = useMessageRatings(isSuperAdmin);
+  const canView = user ? canAccessPermission(user, "message-ratings") : false;
+  const { data = [], isLoading } = useMessageRatings(canView);
 
   const [search, setSearch] = useState("");
   const [ratingFilter, setRatingFilter] = useState("ALL");
@@ -132,10 +132,10 @@ export function MessageRatingsPage() {
     },
   ];
 
-  if (!isSuperAdmin) {
+  if (!canView) {
     return (
       <div>
-        <PageHeader icon={ThumbsUp} title="Message feedback" description="Super Admin only." />
+        <PageHeader icon={ThumbsUp} title="Message feedback" description="Access required." />
         <p className="text-sm text-slate-600">You do not have access to this page.</p>
       </div>
     );
