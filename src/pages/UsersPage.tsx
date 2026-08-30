@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Plus, Trash2, UserPlus, Users, X, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
@@ -48,13 +48,15 @@ function defaultAgentRoleId(roleOptions: { id: number; name: string }[]): string
 }
 
 const ORG_ADMIN_RESTRICTED_NAV = ["organizations", "roles", "message-ratings", "llm-configs"];
+// Roles an account manager may assign, and the only roles they may re-role.
+const ACCOUNT_MANAGER_ROLES: string[] = [ROLES.SUPERVISOR, ROLES.AGENT];
 
 export function UsersPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN);
   const isAccountManager = user?.roles.includes(ROLES.ACCOUNT_MANAGER);
-  const canCreateUsers = isSuperAdmin || isOrgAdmin;
+  const canCreateUsers = isSuperAdmin || isOrgAdmin || isAccountManager;
   const canDeleteUsers = isSuperAdmin || isOrgAdmin;
   const canAssignAccounts = isSuperAdmin || isOrgAdmin || isAccountManager;
   const canManagePageAccess = isSuperAdmin || isOrgAdmin;
@@ -109,9 +111,23 @@ export function UsersPage() {
     (canCreateUsers || isSuperAdmin) && rolesAccountId != null,
   );
   const roleOptions = useMemo(
-    () => roleDefinitions.map((r) => ({ id: r.id, name: r.name, nav_permissions: r.nav_permissions })),
-    [roleDefinitions],
+    () =>
+      roleDefinitions
+        .filter((r) => (isSuperAdmin || isOrgAdmin ? true : ACCOUNT_MANAGER_ROLES.includes(r.name)))
+        .map((r) => ({ id: r.id, name: r.name, nav_permissions: r.nav_permissions })),
+    [roleDefinitions, isSuperAdmin, isOrgAdmin],
   );
+  // Account managers may only re-role supervisors and agents; the backend enforces
+  // this too, along with the "must share an account" rule it can check properly.
+  const canEditRoleOf = useCallback(
+    (target: User | null) => {
+      if (isSuperAdmin) return true;
+      if (!isAccountManager || !target) return false;
+      return target.roles.every((r) => ACCOUNT_MANAGER_ROLES.includes(r));
+    },
+    [isSuperAdmin, isAccountManager],
+  );
+  const canEditEditingRole = canEditRoleOf(editing);
   const selectedRolePreview = useMemo(
     () => roleOptions.find((r) => String(r.id) === form.role_id),
     [roleOptions, form.role_id],
@@ -271,7 +287,7 @@ export function UsersPage() {
           },
         });
         setEditing(updated);
-        if (isSuperAdmin) {
+        if (canEditEditingRole) {
           const roleId = Number(form.role_id || defaultAgentRoleId(roleOptions));
           if (roleId) {
             await setUserRole.mutateAsync({
@@ -516,7 +532,7 @@ export function UsersPage() {
               <div><Label>First Name</Label><Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} className="mt-1" /></div>
               <div><Label>Last Name</Label><Input value={form.last_name} onChange={(e) => setForm({ ...form, last_name: e.target.value })} className="mt-1" /></div>
             </div>
-            {editing && !isSuperAdmin && editing.roles[0] && (
+            {editing && !canEditEditingRole && editing.roles[0] && (
               <div>
                 <Label>Role</Label>
                 <p className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">
@@ -527,7 +543,7 @@ export function UsersPage() {
                 </p>
               </div>
             )}
-            {(!editing || isSuperAdmin) && (
+            {(!editing || canEditEditingRole) && (
               <div>
                 <Label>Role</Label>
                 <Select value={form.role_id} onChange={(e) => setForm({ ...form, role_id: e.target.value })} className="mt-1">
@@ -538,7 +554,7 @@ export function UsersPage() {
                     <RolePageAccessPreview navPermissions={selectedRolePreview.nav_permissions} compact />
                   </div>
                 )}
-                {editing && isSuperAdmin && (
+                {editing && canEditEditingRole && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     Replaces the user&apos;s current role. Account access below is unchanged.
                   </p>
