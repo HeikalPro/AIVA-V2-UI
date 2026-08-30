@@ -343,7 +343,7 @@ export function AccountUpdatesPage() {
                   onChange={(e) => setForm({ ...form, body: e.target.value })}
                   rows={5}
                   placeholder="Write the update message agents will see…"
-                  className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
               </div>
               <div className="flex items-center gap-2">

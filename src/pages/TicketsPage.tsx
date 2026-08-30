@@ -343,7 +343,7 @@ export function TicketsPage() {
             <div><Label>Subject</Label><Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} className="mt-1" /></div>
             <div>
               <Label>Description</Label>
-              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4} className="mt-1 w-full rounded-md border border-input px-3 py-2 text-sm" />
+              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
