@@ -621,6 +621,9 @@ export function UsersPage() {
             <div>
               <Label>Status</Label>
               <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="mt-1">
+                {form.status !== "ACTIVE" && form.status !== "INACTIVE" && (
+                  <option value={form.status}>{form.status.replace(/_/g, " ")}</option>
+                )}
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="INACTIVE">INACTIVE</option>
               </Select>

@@ -373,3 +373,34 @@
   border-color: #334155 !important;
   color: #e2e8f0;
 }
+
+/* --- browser autofill ---
+ * Chrome paints autofilled fields with its own opaque light background that
+ * background-color cannot override, so they stay light in dark mode. Repaint
+ * with a large inset shadow (the only thing that beats it) and force the text
+ * colour; the long transition stops Chrome re-applying it on interaction. */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark input:-webkit-autofill:active,
+.dark textarea:-webkit-autofill,
+.dark select:-webkit-autofill {
+  -webkit-text-fill-color: hsl(var(--foreground));
+  caret-color: hsl(var(--foreground));
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
+  transition: background-color 600000s 0s, color 600000s 0s;
+}
+
+/* auth forms (login, signup, reset, verify) sit on the remapped slate-50 surface */
+.dark input.bg-slate-50:-webkit-autofill,
+.dark .bg-slate-50 input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px hsl(215 22% 14%) inset;
+}
+
+/* those fields switch to the card surface on focus; keep the focus ring visible */
+.dark .focus-within\:bg-white:focus-within input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--card)) inset;
+}
+.dark input.focus\:bg-white:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 2px hsl(var(--ring)), 0 0 0 1000px hsl(var(--card)) inset;
+}
