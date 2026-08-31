@@ -140,7 +140,7 @@ export function RolesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Roles & access"
-        description="Configure page access per account — e.g. Hallan supervisors can differ from another account."
+        description="Configure page access per account — e.g. Halan supervisors can differ from another account."
         icon={Shield}
         actions={
           canExportReport && selectedAccountId != null ? (
@@ -182,7 +182,7 @@ export function RolesPage() {
         </p>
         <ul className="mt-2 list-inside list-disc space-y-1 text-slate-600">
           <li>
-            <strong>Role on this account</strong> — e.g. Agent on Hallan gets Chat only here.
+            <strong>Role on this account</strong> — e.g. Agent on Halan gets Chat only here.
           </li>
           <li>
             <strong>Individual user</strong> (Users → Edit) — extra pages for one person on top of their role.

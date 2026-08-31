@@ -508,7 +508,7 @@ export function UsersPage() {
                 </Select>
                 {!editing && createOrgId && createAccounts.length === 0 && (
                   <p className="mt-1 text-sm text-amber-700">
-                    No accounts in this organization. Create an account first, or pick another organization (e.g. GoChat247 for Hallan).
+                    No accounts in this organization. Create an account first, or pick another organization (e.g. GoChat247 for Halan).
                   </p>
                 )}
                 {editing && Number(form.organization_id) !== editing.organization_id && (

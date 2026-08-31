@@ -356,7 +356,7 @@ export function AccountsPage() {
                 <span className="text-sm font-medium text-slate-800">Installment calculator (widget)</span>
               </label>
               <p className="mt-1 text-xs text-muted-foreground">
-                Enable for Hallan-style accounts. Other accounts can leave this off.
+                Enable for Halan-style accounts. Other accounts can leave this off.
               </p>
               {form.calculator_enabled && (
                 <div className="mt-3 space-y-3">
