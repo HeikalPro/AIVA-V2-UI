@@ -340,6 +340,7 @@ export type MessageRating = {
   rating: "up" | "down";
   feedback: string | null;
   rated_at: string | null;
+  active_queues: string[];
 };
 
 export type Ticket = {

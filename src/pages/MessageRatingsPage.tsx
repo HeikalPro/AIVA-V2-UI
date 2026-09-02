@@ -5,6 +5,7 @@ import { canAccessPermission } from "@/lib/roles";
 import { useMessageRatings } from "@/hooks/useMessageRatings";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { DataTable, type Column } from "@/components/shared/DataTable";
+import { Badge } from "@/components/ui/badge";
 import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
 import type { MessageRating } from "@/types/api";
@@ -60,6 +61,7 @@ export function MessageRatingsPage() {
             r.organization_name ?? "",
             r.message_text,
             r.feedback ?? "",
+            ...r.active_queues,
           ].join(" "),
       ),
     [data, ratingFilter, accountFilter, search],
@@ -112,6 +114,24 @@ export function MessageRatingsPage() {
       sortable: true,
       sortValue: (r) => r.account_name ?? "",
       render: (r) => r.account_name ?? `Account #${r.account_id}`,
+    },
+    {
+      key: "queues",
+      header: "Queues in chat",
+      render: (r) =>
+        r.active_queues.length ? (
+          <div className="flex flex-wrap gap-1">
+            {r.active_queues.map((q) => (
+              <Badge key={q} variant="default">
+                {q}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <Badge variant="muted" title="Agent had not narrowed the search — all allowed queues were active">
+            All queues
+          </Badge>
+        ),
     },
     {
       key: "message",
