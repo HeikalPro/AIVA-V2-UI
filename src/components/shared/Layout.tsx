@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
@@ -119,6 +119,8 @@ export function Layout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
+  const mainRef = useRef<HTMLElement>(null);
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     const onResize = () => {
@@ -128,6 +130,17 @@ export function Layout() {
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // The page's real scroll container is <main>, not the document; track it so the
+  // header can lift off the content it scrolls over instead of slicing it.
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const onScroll = () => setScrolled(el.scrollTop > 4);
+    onScroll();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
   const navItems = NAV_ITEMS.filter((item) => user && canAccessNav(user, item));
@@ -223,7 +236,11 @@ export function Layout() {
       </aside>
 
       <div className={`flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ${sidebarOpen ? "lg:ml-64" : "lg:ml-16"} ${isMobile ? "ml-0" : ""}`}>
-        <header className={`fixed top-0 z-40 flex h-16 items-center border-b border-border bg-background px-4 lg:px-6 right-0 ${sidebarOpen ? "lg:left-64" : "lg:left-16"} left-0`}>
+        <header
+          className={`fixed top-0 z-40 flex h-16 items-center border-b bg-[hsl(var(--background)/0.85)] px-4 backdrop-blur-md transition-shadow duration-200 lg:px-6 right-0 ${
+            sidebarOpen ? "lg:left-64" : "lg:left-16"
+          } left-0 ${scrolled ? "border-border shadow-[0_1px_12px_rgba(15,23,42,0.08)]" : "border-transparent"}`}
+        >
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
             <Menu className="h-5 w-5" />
           </Button>
@@ -242,7 +259,11 @@ export function Layout() {
           </Button>
         </header>
 
-        <main className="flex-1 overflow-y-auto overflow-x-hidden pt-16">
+        {/* `relative` is load-bearing: it makes <main> the containing block for absolutely
+            positioned descendants (e.g. sr-only labels), which otherwise resolve against the
+            viewport, escape this scroller's clip, and give the document a phantom scrollbar
+            that drags the whole fixed-height shell out of view. */}
+        <main ref={mainRef} className="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pt-16">
           <div className="min-h-full w-full p-4 sm:p-6 lg:p-8">
             <Outlet />
           </div>
