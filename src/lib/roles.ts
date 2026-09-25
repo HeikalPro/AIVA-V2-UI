@@ -23,7 +23,10 @@ export type NavPermissionKey =
   | "tickets"
   | "ingestion"
   | "logs"
-  | "system";
+  | "system"
+  | "document-import"
+  | "sharepoint-sync"
+  | "monitoring";
 
 export type NavItem = {
   path: string;
@@ -32,6 +35,12 @@ export type NavItem = {
   permission: NavPermissionKey;
   /** Legacy role list — used when API permissions are unavailable. */
   roles: string[];
+  /**
+   * Role-locked page: only these roles (Super Admin always passes) can open it, and page
+   * permissions from the API never grant it. Locked pages are left out of the role defaults
+   * and the page-access editors, so they cannot be granted to anyone.
+   */
+  lockedRoles?: string[];
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -134,7 +143,39 @@ export const NAV_ITEMS: NavItem[] = [
     permission: "logs",
     roles: [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR, ROLES.DEVELOPER],
   },
+  {
+    path: "/document-import",
+    label: "Document Import",
+    icon: "FileUp",
+    permission: "document-import",
+    roles: [ROLES.SUPER_ADMIN],
+    lockedRoles: [ROLES.SUPER_ADMIN],
+  },
+  {
+    path: "/sharepoint-sync",
+    label: "SharePoint Sync",
+    icon: "FolderSync",
+    permission: "sharepoint-sync",
+    roles: [ROLES.SUPER_ADMIN],
+    lockedRoles: [ROLES.SUPER_ADMIN],
+  },
+  {
+    path: "/monitoring",
+    label: "Monitoring",
+    icon: "Activity",
+    permission: "monitoring",
+    roles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
+    lockedRoles: [ROLES.SUPER_ADMIN, ROLES.DEVELOPER],
+  },
 ];
+
+/** Pages that role/user page permissions can grant: every nav item except the role-locked ones. */
+const GRANTABLE_NAV_ITEMS = NAV_ITEMS.filter((item) => !item.lockedRoles);
+
+/** The roles a locked page is restricted to, or undefined when the page is grantable. */
+function lockedRolesFor(permission: NavPermissionKey): string[] | undefined {
+  return NAV_ITEMS.find((item) => item.permission === permission && item.lockedRoles)?.lockedRoles;
+}
 
 export type AccessUser = {
   roles: string[];
@@ -143,9 +184,9 @@ export type AccessUser = {
 
 export function getDefaultNavPermissionsForRole(roleName: string): NavPermissionKey[] {
   if (roleName === ROLES.SUPER_ADMIN) {
-    return NAV_ITEMS.map((item) => item.permission);
+    return GRANTABLE_NAV_ITEMS.map((item) => item.permission);
   }
-  return NAV_ITEMS.filter((item) => item.roles.includes(roleName)).map((item) => item.permission);
+  return GRANTABLE_NAV_ITEMS.filter((item) => item.roles.includes(roleName)).map((item) => item.permission);
 }
 
 export function canAccess(roles: string[], required: string[]): boolean {
@@ -156,6 +197,11 @@ export function canAccess(roles: string[], required: string[]): boolean {
 
 export function canAccessPermission(user: AccessUser, permission: NavPermissionKey): boolean {
   if (user.roles.includes(ROLES.SUPER_ADMIN)) return true;
+  const lockedRoles = lockedRolesFor(permission);
+  if (lockedRoles) {
+    // Role check only; the API permissions list is ignored. An empty list locks the page to Super Admin.
+    return lockedRoles.length > 0 && canAccess(user.roles, lockedRoles);
+  }
   if (user.permissions && user.permissions.length > 0) {
     return user.permissions.includes(permission);
   }
@@ -179,5 +225,5 @@ export function displayRole(roles: string[]): string {
 }
 
 export const NAV_PERMISSION_LABELS: Record<NavPermissionKey, string> = Object.fromEntries(
-  NAV_ITEMS.map((item) => [item.permission, item.label]),
+  GRANTABLE_NAV_ITEMS.map((item) => [item.permission, item.label]),
 ) as Record<NavPermissionKey, string>;
