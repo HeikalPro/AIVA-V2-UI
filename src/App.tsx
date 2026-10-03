@@ -24,6 +24,9 @@ import { IngestionPage } from "@/pages/IngestionPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { MessageRatingsPage } from "@/pages/MessageRatingsPage";
 import { AccountUpdatesPage } from "@/pages/AccountUpdatesPage";
+import { DocumentImportPage } from "@/pages/DocumentImportPage";
+import { SharePointSyncPage } from "@/pages/SharePointSyncPage";
+import { MonitoringPage } from "@/pages/MonitoringPage";
 
 const ROUTE_PAGES: Record<string, ReactNode> = {
   "/": <DashboardPage />,
@@ -41,6 +44,9 @@ const ROUTE_PAGES: Record<string, ReactNode> = {
   "/tickets": <TicketsPage />,
   "/ingestion": <IngestionPage />,
   "/logs": <LogsPage />,
+  "/document-import": <DocumentImportPage />,
+  "/sharepoint-sync": <SharePointSyncPage />,
+  "/monitoring": <MonitoringPage />,
 };
 
 export function App() {

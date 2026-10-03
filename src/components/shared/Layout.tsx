@@ -7,6 +7,8 @@ import {
   Bell,
   Cpu,
   FileText,
+  FileUp,
+  FolderSync,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -50,6 +52,8 @@ const ICONS: Record<string, LucideIcon> = {
   UserCheck,
   Activity,
   Package,
+  FileUp,
+  FolderSync,
 };
 
 function NavItem({
