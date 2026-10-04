@@ -1,15 +1,39 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { QueueGroup } from "@/types/api";
-import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   queues: QueueGroup[];
   selected: string[];
   onChange: (keys: string[]) => void;
   disabled?: boolean;
+  /** Visible group label (default "KB queues"). */
+  label?: string;
+  /** Hide the visible label (still used as the group's accessible name). */
+  hideLabel?: boolean;
+  /** sm chips (32px) or xs-ish compact chips (28px) for toolbars. */
+  size?: "sm" | "xs";
+  className?: string;
 };
 
-export function QueueSelector({ queues, selected, onChange, disabled }: Props) {
+/**
+ * Toggle chips for knowledge-base queues. At least one queue stays selected (the last chip
+ * cannot be turned off). Selected chips are tinted and carry a check mark, so state is not
+ * conveyed by colour alone; each chip is a toggle button (aria-pressed).
+ */
+export function QueueSelector({
+  queues,
+  selected,
+  onChange,
+  disabled,
+  label = "KB queues",
+  hideLabel = false,
+  size = "sm",
+  className,
+}: Props) {
+  const labelId = useId();
   const [local, setLocal] = useState<string[]>(selected);
 
   useEffect(() => {
@@ -34,36 +58,52 @@ export function QueueSelector({ queues, selected, onChange, disabled }: Props) {
 
   if (!queues.length) return null;
 
+  const allSelected = local.length === queues.length;
+
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Label className="mb-0">KB queues</Label>
-        <button
-          type="button"
-          className="text-xs text-primary underline-offset-2 hover:underline disabled:opacity-50"
-          onClick={selectAll}
-          disabled={disabled || local.length === queues.length}
-        >
-          Select all
-        </button>
+    <div className={cn("space-y-2", className)}>
+      <div className={cn("flex flex-wrap items-center gap-2", hideLabel && "sr-only")}>
+        <span id={labelId} className="text-ui font-medium text-foreground">
+          {label}
+        </span>
+        {!hideLabel && (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0 text-xs"
+            onClick={selectAll}
+            disabled={disabled || allSelected}
+          >
+            Select all
+          </Button>
+        )}
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div role="group" aria-labelledby={labelId} className="flex flex-wrap gap-1.5">
         {queues.map((q) => {
           const on = local.includes(q.key);
+          const isLast = on && local.length === 1;
           return (
-            <button
+            <Button
               key={q.key}
               type="button"
+              variant="outline"
+              size="sm"
+              aria-pressed={on}
               disabled={disabled}
+              title={isLast ? "At least one queue stays selected" : undefined}
               onClick={() => toggle(q.key)}
-              className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+              className={cn(
+                "rounded-full",
+                size === "xs" ? "h-7 px-2.5" : "px-3",
                 on
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-background text-muted-foreground hover:border-primary/40"
-              }`}
+                  ? "border-primary/60 bg-primary-muted text-primary-muted-foreground hover:border-primary hover:bg-primary-muted hover:text-primary-muted-foreground"
+                  : "text-muted-foreground",
+              )}
             >
-              {q.label}
-            </button>
+              {on && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
+              <span dir="auto">{q.label}</span>
+            </Button>
           );
         })}
       </div>

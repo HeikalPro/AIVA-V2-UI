@@ -7,12 +7,13 @@ type Props = {
   /** File-level error, used when the failed stage carries no message of its own. */
   fallbackError?: string | null;
   showReason?: boolean;
+  variant?: "compact" | "labeled";
   className?: string;
 };
 
 /**
- * A SharePoint file's five stages: download → extraction → CRM intelligence → entities → save to
- * CRM. Green = done, red = failed (reason inline), spinner = running, grey = waiting or skipped.
+ * A SharePoint file's five stages (download → extraction → CRM intelligence → entities → save to
+ * CRM) in the shared pipeline component used by Document Import.
  */
 export function CrmStagePipeline(props: Props) {
   return <StagePipeline {...props} stageDefs={CRM_STAGES} />;

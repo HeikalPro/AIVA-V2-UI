@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
-import { Building2, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
+import { AlertCircle, Building2, Pencil, Plus, Trash2 } from "lucide-react";
 import { formatUserError } from "@/lib/errors";
+import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import {
   useCreateOrganization,
   useDeleteOrganization,
@@ -10,25 +11,41 @@ import {
 } from "@/hooks/useOrganizations";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useUsers } from "@/hooks/useUsers";
-import { OrganizationDeleteDialog } from "@/components/organizations/OrganizationDeleteDialog";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { OrganizationDeleteDialog } from "@/components/organizations/OrganizationDeleteDialog";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Status } from "@/components/data/status";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/components/ui/toast";
+import { OverflowChips } from "@/components/users/OverflowChips";
+import { useDeepLinks } from "@/components/users/useDeepLinks";
 import type { Organization, OrganizationDeleteSummary } from "@/types/api";
+import { useReturnFocus } from "@/components/users/useReturnFocus";
 
 export function OrganizationsPage() {
-  const { data = [], isLoading } = useOrganizations();
+  const orgsQuery = useOrganizations();
+  const { data = [], isLoading } = orgsQuery;
   const createOrg = useCreateOrganization();
   const updateOrg = useUpdateOrganization();
   const deleteOrg = useDeleteOrganization();
+  const returnFocus = useReturnFocus();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Organization | null>(null);
@@ -38,7 +55,6 @@ export function OrganizationsPage() {
   const [status, setStatus] = useState("ACTIVE");
   const [error, setError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
 
@@ -98,13 +114,18 @@ export function OrganizationsPage() {
     }
   }
 
+  // Command palette: ?action=create opens the create dialog, ?q=<name> pre-fills the search.
+  useDeepLinks({ onCreate: openCreate, onSearch: setSearch });
+
   async function handleSave() {
     setError(null);
     try {
       if (editing) {
         await updateOrg.mutateAsync({ id: editing.id, body: { name, status } });
+        toast.success("Organization updated", { description: name });
       } else {
         await createOrg.mutateAsync({ name, code, status });
+        toast.success("Organization created", { description: name });
       }
       setDialogOpen(false);
     } catch (e) {
@@ -112,12 +133,18 @@ export function OrganizationsPage() {
     }
   }
 
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (createOrg.isPending || updateOrg.isPending) return;
+    void handleSave();
+  }
+
   async function handleConfirmDelete() {
     if (!deleteTarget) return;
     setDeleteError(null);
     try {
       const result = await deleteOrg.mutateAsync(deleteTarget.id);
-      setDeleteSuccess(result.message);
+      toast.success(result.message || "Organization deleted");
       setDeleteTarget(null);
     } catch (e) {
       setDeleteError(formatUserError(e));
@@ -142,137 +169,215 @@ export function OrganizationsPage() {
     setStatusFilter("ALL");
   }
 
+  const columns: Column<Organization>[] = [
+    { key: "id", header: "ID", numeric: true, sortable: true, defaultHidden: true, width: 72 },
+    {
+      key: "name",
+      header: "Name",
+      sortable: true,
+      sortValue: (o) => o.name.toLowerCase(),
+      render: (o) => (
+        <span dir="auto" className="block max-w-[18rem] truncate font-medium text-foreground" title={o.name}>
+          {o.name}
+        </span>
+      ),
+    },
+    {
+      key: "code",
+      header: "Code",
+      sortable: true,
+      render: (o) => <span className="font-mono text-xs text-muted-foreground">{o.code}</span>,
+    },
+    {
+      key: "account_names",
+      header: "Accounts",
+      sortable: true,
+      sortValue: (o) => o.account_count ?? o.account_names?.length ?? 0,
+      render: (o) => (
+        <OverflowChips
+          noun="accounts"
+          items={(o.account_names ?? []).map((n) => ({ key: n, label: n }))}
+          empty={<span className="text-muted-foreground">No accounts</span>}
+        />
+      ),
+    },
+    { key: "status", header: "Status", sortable: true, render: (o) => <Status value={o.status} /> },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      render: (o) =>
+        o.created_at ? (
+          <Tooltip content={formatDateTime(o.created_at)}>
+            <span className="text-muted-foreground">
+              {formatDate(o.created_at)}
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="text-subtle-foreground">—</span>
+        ),
+    },
+    actionsColumn<Organization>(
+      (o) => [
+        { label: "Edit", icon: Pencil, onSelect: () => openEdit(o) },
+        { label: "Delete", icon: Trash2, destructive: true, separatorBefore: true, onSelect: () => openDelete(o) },
+      ],
+      { label: (o) => `Actions for ${o.name}` },
+    ),
+  ];
+
+  const isFiltered = search.trim() !== "" || statusFilter !== "ALL";
+  let empty: DataTableEmpty;
+  if (orgsQuery.isError) {
+    empty = {
+      icon: AlertCircle,
+      title: "Couldn't load organizations",
+      description: formatUserError(orgsQuery.error),
+      action: (
+        <Button variant="outline" size="sm" onClick={() => void orgsQuery.refetch()}>
+          Try again
+        </Button>
+      ),
+    };
+  } else if (data.length === 0) {
+    empty = {
+      icon: Building2,
+      title: "No organizations yet",
+      description: "Organizations group the accounts and users of one tenant.",
+      action: (
+        <Button size="sm" onClick={openCreate}>
+          <Plus aria-hidden="true" className="h-4 w-4" />
+          Add organization
+        </Button>
+      ),
+    };
+  } else {
+    empty = {
+      title: "No organizations match these filters",
+      action: (
+        <Button variant="outline" size="sm" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ),
+    };
+  }
+
+  const editingAccounts = editing?.account_names ?? [];
+  const editingAccountCount = editing ? (editing.account_count ?? editing.account_names?.length ?? 0) : 0;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={Building2}
+    <Page width="wide">
+      <PageHeading
         title="Organizations"
-        description="Manage tenant organizations"
+        description="Tenant organizations and the accounts that belong to them."
+        meta={
+          isLoading ? (
+            <Skeleton className="h-4 w-24" />
+          ) : orgsQuery.isError ? null : (
+            <span>
+              {formatNumber(data.length)} {data.length === 1 ? "organization" : "organizations"}
+            </span>
+          )
+        }
         actions={
           <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" /> New Organization
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            Add organization
           </Button>
         }
       />
 
-      {deleteSuccess && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {deleteSuccess}
-        </div>
-      )}
-
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search by name, code, or account…"
-        filters={[
-          {
-            id: "org-status-filter",
-            label: "Status",
-            value: statusFilter,
-            onChange: setStatusFilter,
-            options: [
-              { value: "ALL", label: "All statuses" },
-              { value: "ACTIVE", label: "Active" },
-              { value: "INACTIVE", label: "Inactive" },
-            ],
-          },
-        ]}
-        onClear={clearFilters}
-        totalCount={data.length}
-        filteredCount={filteredData.length}
-      />
-
       <DataTable<Organization>
-        columns={[
-          { key: "id", header: "ID", sortable: true },
-          { key: "name", header: "Name", sortable: true },
-          { key: "code", header: "Code", sortable: true },
-          {
-            key: "account_names",
-            header: "Accounts",
-            render: (r) => {
-              const names = r.account_names ?? [];
-              if (!names.length) {
-                return <span className="text-sm text-muted-foreground">No accounts</span>;
-              }
-              return (
-                <div className="flex max-w-md flex-wrap gap-1" title={names.join(", ")}>
-                  {names.map((name) => (
-                    <Badge key={name} variant="muted">{name}</Badge>
-                  ))}
-                </div>
-              );
-            },
-          },
-          { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-          {
-            key: "actions",
-            header: "",
-            render: (r) => (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>
-                  Edit
-                </Button>
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openDelete(r); }}>
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-        data={filteredData}
-        keyFn={(r) => r.id}
+        aria-label="Organizations"
+        columns={columns}
+        data={orgsQuery.isError ? [] : filteredData}
+        keyFn={(o) => o.id}
         loading={isLoading}
-        emptyMessage={data.length ? "No organizations match your search or filters" : "No organizations"}
+        empty={empty}
         onRowClick={openEdit}
+        rowLabel={(o) => o.name}
+        itemLabel="organizations"
+        defaultSort={{ key: "name", dir: "asc" }}
+        enableColumnVisibility
+        persistKey="organizations"
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search name, code or account…"
+            filters={[
+              {
+                id: "org-status-filter",
+                label: "Status",
+                value: statusFilter,
+                onChange: setStatusFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  { value: "ACTIVE", label: "Active" },
+                  { value: "INACTIVE", label: "Inactive" },
+                ],
+              },
+            ]}
+            onClear={clearFilters}
+            isFiltered={isFiltered}
+            totalCount={isFiltered ? data.length : undefined}
+            filteredCount={filteredData.length}
+            itemLabel="organizations"
+          />
+        }
       />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit Organization" : "New Organization"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Name</Label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1" />
-            </div>
-            {!editing && (
-              <div>
-                <Label>Code</Label>
-                <Input value={code} onChange={(e) => setCode(e.target.value)} className="mt-1" />
-              </div>
-            )}
-            <div>
-              <Label>Status</Label>
-              <Select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1">
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="INACTIVE">INACTIVE</option>
-              </Select>
-            </div>
-            {editing && (
-              <div>
-                <Label>Accounts ({editing.account_count ?? editing.account_names?.length ?? 0})</Label>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {(editing.account_names ?? []).length ? (
-                    editing.account_names!.map((accountName) => (
-                      <Badge key={accountName} variant="muted">{accountName}</Badge>
-                    ))
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="md">
+        <DialogContent onCloseAutoFocus={returnFocus}>
+          <form onSubmit={onSubmit} noValidate className="contents">
+            <DialogHeader>
+              <DialogTitle>{editing ? "Edit organization" : "Add organization"}</DialogTitle>
+              <DialogDescription>
+                {editing ? "Changes apply to every account and user in this organization." : "A tenant that owns accounts and users."}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <ErrorAlert message={error} />
+              <Field label="Name" required>
+                <Input dir="auto" value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+              {editing ? (
+                <Field label="Code" hint="The code can't be changed.">
+                  <Input value={code} readOnly className="font-mono" />
+                </Field>
+              ) : (
+                <Field label="Code" hint="Short unique identifier, e.g. HALAN. It can't be changed later." required>
+                  <Input value={code} onChange={(e) => setCode(e.target.value)} className="font-mono" autoComplete="off" />
+                </Field>
+              )}
+              <Field label="Status">
+                <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </Select>
+              </Field>
+              {editing && (
+                <div className="space-y-1.5">
+                  <p className="text-ui font-medium text-foreground">
+                    Accounts <span className="font-normal tabular-nums text-muted-foreground">({formatNumber(editingAccountCount)})</span>
+                  </p>
+                  {editingAccounts.length ? (
+                    <OverflowChips max={12} noun="accounts" items={editingAccounts.map((n) => ({ key: n, label: n }))} />
                   ) : (
-                    <span className="text-sm text-muted-foreground">No accounts in this organization</span>
+                    <p className="text-sm text-muted-foreground">No accounts in this organization.</p>
                   )}
                 </div>
-              </div>
-            )}
-            {error && <p className="text-sm text-red-600">{error}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={createOrg.isPending || updateOrg.isPending}>
-              {editing ? "Save" : "Create"}
-            </Button>
-          </DialogFooter>
+              )}
+            </DialogBody>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={createOrg.isPending || updateOrg.isPending}>
+                {editing ? "Save changes" : "Create organization"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -287,6 +392,6 @@ export function OrganizationsPage() {
         onCancel={closeDelete}
         onConfirm={handleConfirmDelete}
       />
-    </div>
+    </Page>
   );
 }

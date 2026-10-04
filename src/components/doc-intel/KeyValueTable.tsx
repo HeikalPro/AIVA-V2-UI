@@ -16,16 +16,20 @@ function CompactValue({ value, depth }: { value: unknown; depth: number }) {
     return <span className="font-mono text-xs">{value ? "true" : "false"}</span>;
   }
   if (isPrimitive(value)) {
-    return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
+    return (
+      <span dir="auto" className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+        {String(value)}
+      </span>
+    );
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-muted-foreground">none</span>;
-    if (value.every(isPrimitive)) return <span className="break-words">{value.map(String).join(", ")}</span>;
+    if (value.every(isPrimitive)) return <span className="[overflow-wrap:anywhere]">{value.map(String).join(", ")}</span>;
     if (depth >= 1) return <code className="block whitespace-pre-wrap break-all font-mono text-xs">{JSON.stringify(value)}</code>;
     return (
       <ul className="space-y-1">
         {value.map((item, i) => (
-          <li key={i} className="rounded-md border border-border px-2 py-1">
+          <li key={i} className="rounded-md border border-border bg-surface-muted px-2 py-1">
             <CompactValue value={item} depth={depth + 1} />
           </li>
         ))}
@@ -55,33 +59,25 @@ function CompactValue({ value, depth }: { value: unknown; depth: number }) {
 type Props = {
   data: Record<string, unknown> | null | undefined;
   emptyMessage?: string;
+  className?: string;
 };
 
-/** Key/value table for a free-form `details` object (health diagnostics, extractor info). */
-export function KeyValueTable({ data, emptyMessage = "No details reported." }: Props) {
+/** Key/value list for a free-form `details` object (health diagnostics, extractor info). Keys in mono. */
+export function KeyValueTable({ data, emptyMessage = "No details reported.", className }: Props) {
   const entries = Object.entries(data ?? {});
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <tbody>
-          {entries.map(([key, value]) => (
-            <tr key={key} className="border-b border-border align-top last:border-0">
-              <th
-                scope="row"
-                className="w-1/3 break-all py-1.5 pr-3 text-left font-mono text-xs font-medium text-muted-foreground"
-              >
-                {key}
-              </th>
-              <td className="min-w-0 py-1.5 text-foreground">
-                <CompactValue value={value} depth={0} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <dl className={`divide-y divide-border text-ui ${className ?? ""}`.trim()}>
+      {entries.map(([key, value]) => (
+        <div key={key} className="grid gap-x-4 gap-y-0.5 py-1.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(8rem,34%)_minmax(0,1fr)]">
+          <dt className="break-all font-mono text-xs leading-5 text-muted-foreground">{key}</dt>
+          <dd className="min-w-0 text-foreground">
+            <CompactValue value={value} depth={0} />
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

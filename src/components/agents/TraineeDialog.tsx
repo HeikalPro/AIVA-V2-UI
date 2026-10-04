@@ -1,14 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { formatUserError } from "@/lib/errors";
-import { buildLoginEmail } from "@/lib/login-email";
+import { buildLoginEmail, LOGIN_EMAIL_DOMAIN } from "@/lib/login-email";
+import { passwordHint } from "@/lib/password-hint";
 import { LoginEmailField } from "@/components/auth/LoginEmailField";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Field, FieldGroup } from "@/components/ui/field";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { toast } from "@/components/ui/toast";
 import type { Account } from "@/types/api";
 import { useCreateTrainee } from "@/hooks/useAgents";
+import { useReturnFocus } from "@/components/users/useReturnFocus";
 
 type Props = {
   open: boolean;
@@ -19,6 +31,7 @@ type Props = {
 
 export function TraineeDialog({ open, onOpenChange, accounts, defaultAccountId = "" }: Props) {
   const createTrainee = useCreateTrainee();
+  const returnFocus = useReturnFocus();
   const [form, setForm] = useState({
     emailLocal: "",
     password: "",
@@ -68,91 +81,89 @@ export function TraineeDialog({ open, onOpenChange, accounts, defaultAccountId =
         status: form.status,
       });
       onOpenChange(false);
+      toast.success("Trainee created", { description: email });
     } catch (e) {
       setError(formatUserError(e));
     }
   }
 
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (createTrainee.isPending || accounts.length === 0) return;
+    void handleSave();
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New Trainee</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Creates an agent account with a <span className="font-medium">@gochat247.com</span> email assigned to the selected account.
-          </p>
-          <LoginEmailField
-            localPart={form.emailLocal}
-            onLocalPartChange={(emailLocal) => setForm({ ...form, emailLocal })}
-          />
-          <div>
-            <Label>Password</Label>
-            <Input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="mt-1"
+    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+      <DialogContent onCloseAutoFocus={returnFocus}>
+        <form onSubmit={onSubmit} className="contents" noValidate>
+          <DialogHeader>
+            <DialogTitle>Add trainee</DialogTitle>
+            <DialogDescription>
+              Creates an agent login with an @{LOGIN_EMAIL_DOMAIN} email, assigned to the selected account.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            <ErrorAlert message={error} />
+            <LoginEmailField
+              localPart={form.emailLocal}
+              onLocalPartChange={(emailLocal) => setForm({ ...form, emailLocal })}
             />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>First Name</Label>
+            <Field label="Password" hint={passwordHint()} required>
               <Input
-                value={form.first_name}
-                onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                className="mt-1"
+                type="password"
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
               />
-            </div>
-            <div>
-              <Label>Last Name</Label>
-              <Input
-                value={form.last_name}
-                onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <div>
-            <Label>Account</Label>
-            <Select
-              value={form.account_id}
-              onChange={(e) => setForm({ ...form, account_id: e.target.value })}
-              className="mt-1"
-            >
-              {accounts.length === 0 ? (
-                <option value="">No accounts available</option>
-              ) : (
-                accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))
-              )}
-            </Select>
-          </div>
-          <div>
-            <Label>Status</Label>
-            <Select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="mt-1"
-            >
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="INACTIVE">INACTIVE</option>
-            </Select>
-          </div>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={createTrainee.isPending || accounts.length === 0}>
-            {createTrainee.isPending ? "Creating…" : "Create Trainee"}
-          </Button>
-        </DialogFooter>
+            </Field>
+            <FieldGroup>
+              <Field label="First name">
+                <Input
+                  dir="auto"
+                  value={form.first_name}
+                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                />
+              </Field>
+              <Field label="Last name">
+                <Input
+                  dir="auto"
+                  value={form.last_name}
+                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                />
+              </Field>
+            </FieldGroup>
+            <FieldGroup>
+              <Field label="Account" required>
+                <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+                  {accounts.length === 0 ? (
+                    <option value="">No accounts available</option>
+                  ) : (
+                    accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))
+                  )}
+                </Select>
+              </Field>
+              <Field label="Status">
+                <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </Select>
+              </Field>
+            </FieldGroup>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={createTrainee.isPending} disabled={accounts.length === 0}>
+              {createTrainee.isPending ? "Creating…" : "Create trainee"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

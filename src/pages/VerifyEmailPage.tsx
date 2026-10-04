@@ -1,10 +1,12 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthShell, authLinkClass } from "@/components/auth/AuthShell";
+import { FullScreenLoader } from "@/components/shell/full-screen-loader";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   clearVerifyEmail,
   getVerifyEmail,
@@ -37,13 +39,7 @@ export function VerifyEmailPage() {
     return () => window.clearTimeout(t);
   }, [cooldown]);
 
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        Loading...
-      </div>
-    );
-  }
+  if (authLoading) return <FullScreenLoader />;
   if (user) return <Navigate to="/" replace />;
 
   async function handleSubmit(e: FormEvent) {
@@ -76,24 +72,19 @@ export function VerifyEmailPage() {
   }
 
   return (
-    <AuthShell
-      title="Verify your email"
-      subtitle="Enter the verification code sent to your email."
-    >
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+    <AuthShell title="Verify your email" subtitle="Enter the verification code sent to your email.">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Email">
           <Input
             id="email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="otp">Verification code</Label>
+        </Field>
+        <Field label="Verification code" hint="6 digits">
           <Input
             id="otp"
             inputMode="numeric"
@@ -103,33 +94,26 @@ export function VerifyEmailPage() {
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
             required
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 text-center text-lg tracking-widest focus:bg-white"
+            className="h-11 text-center font-mono text-lg tracking-[0.4em]"
           />
-        </div>
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">
-            {error}
-          </div>
-        )}
-        {info && (
-          <div className="rounded-xl border border-green-200 bg-green-50 px-3.5 py-3 text-sm text-green-800" role="status">
-            {info}
-          </div>
-        )}
-        <Button type="submit" className="h-11 w-full rounded-xl text-sm font-semibold" disabled={loading}>
+        </Field>
+        {error && <Alert tone="danger" description={error} />}
+        {info && <Alert tone="success" description={info} />}
+        <Button type="submit" size="lg" className="w-full" loading={loading}>
           {loading ? "Verifying..." : "Verify email"}
         </Button>
         <Button
           type="button"
           variant="outline"
-          className="h-11 w-full rounded-xl text-sm"
+          size="lg"
+          className="w-full tabular-nums"
           disabled={cooldown > 0 || !email.trim()}
           onClick={handleResend}
         >
           {cooldown > 0 ? `Resend code (${cooldown}s)` : "Resend code"}
         </Button>
-        <p className="text-center text-sm text-slate-500">
-          <Link to="/login" className="font-medium text-slate-800 hover:underline">
+        <p className="pt-1 text-center text-sm">
+          <Link to="/login" className={authLinkClass}>
             Back to sign in
           </Link>
         </p>

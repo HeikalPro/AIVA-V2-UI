@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
-import { Bell, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
+import { AlertCircle, Lock, Megaphone, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
+import { formatDateTime, formatNumber, formatRelativeTime } from "@/lib/format";
 import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
@@ -11,18 +12,35 @@ import {
   useUpdateAccountUpdate,
   useDeleteAccountUpdate,
 } from "@/hooks/useAccountUpdates";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { filterRows } from "@/lib/table-filters";
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { EmptyState } from "@/components/data/empty-state";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Status } from "@/components/data/status";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/components/ui/toast";
+import { useDeepLinks } from "@/components/users/useDeepLinks";
 import type { AccountAnnouncement } from "@/types/api";
+import { useReturnFocus } from "@/components/users/useReturnFocus";
 
 export function AccountUpdatesPage() {
   const { user } = useAuth();
@@ -30,17 +48,21 @@ export function AccountUpdatesPage() {
   const canManage = user != null && canAccessPermission(user, "account-updates");
 
   const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const { data = [], isLoading } = useAccountUpdates({
+  const accountsQuery = useAccounts(isSuperAdmin ? null : user?.organization_id);
+  const { data: accounts = [] } = accountsQuery;
+  const updatesQuery = useAccountUpdates({
     organization_id: isSuperAdmin ? undefined : user?.organization_id,
   });
+  const { data = [], isLoading } = updatesQuery;
   const createUpdate = useCreateAccountUpdate();
   const updateUpdate = useUpdateAccountUpdate();
   const deleteUpdate = useDeleteAccountUpdate();
+  const returnFocus = useReturnFocus();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<AccountAnnouncement | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
@@ -58,6 +80,14 @@ export function AccountUpdatesPage() {
     () => new Map(organizations.map((o) => [o.id, o.name])),
     [organizations],
   );
+
+  function accountName(u: AccountAnnouncement): string {
+    return u.account_name ?? accountNameById.get(u.account_id) ?? `Account #${u.account_id}`;
+  }
+
+  function organizationName(u: AccountAnnouncement): string {
+    return u.organization_name ?? organizationNameById.get(u.organization_id ?? 0) ?? `Org #${u.organization_id}`;
+  }
 
   const filteredData = useMemo(
     () =>
@@ -111,6 +141,14 @@ export function AccountUpdatesPage() {
     setDialogOpen(true);
   }
 
+  // Command palette: ?action=create opens the publish dialog once accounts are loaded.
+  useDeepLinks({
+    onCreate: openCreate,
+    canCreate: canManage,
+    onSearch: setSearch,
+    ready: !accountsQuery.isLoading,
+  });
+
   async function handleSave() {
     setError(null);
     if (!form.account_id) {
@@ -131,6 +169,7 @@ export function AccountUpdatesPage() {
             is_active: form.is_active,
           },
         });
+        toast.success("Update saved", { description: form.title.trim() });
       } else {
         await createUpdate.mutateAsync({
           account_id: Number(form.account_id),
@@ -138,11 +177,20 @@ export function AccountUpdatesPage() {
           body: form.body.trim(),
           is_active: form.is_active,
         });
+        toast.success(form.is_active ? "Update published" : "Update saved as inactive", {
+          description: form.title.trim(),
+        });
       }
       setDialogOpen(false);
     } catch (e) {
       setError(formatUserError(e));
     }
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (createUpdate.isPending || updateUpdate.isPending) return;
+    void handleSave();
   }
 
   function clearFilters() {
@@ -154,158 +202,238 @@ export function AccountUpdatesPage() {
 
   if (!canManage) {
     return (
-      <div className="p-6 text-sm text-slate-600">
-        You do not have permission to manage account updates.
-      </div>
+      <Page width="wide">
+        <PageHeading title="Updates" />
+        <EmptyState
+          icon={Lock}
+          title="You don't have permission to manage updates"
+          description="Ask an administrator for access to Updates."
+        />
+      </Page>
     );
   }
 
+  const columns: Column<AccountAnnouncement>[] = [
+    {
+      key: "title",
+      header: "Title",
+      sortable: true,
+      sortValue: (u) => u.title.toLowerCase(),
+      minWidth: 240,
+      render: (u) => (
+        <div className="min-w-0 max-w-[28rem]">
+          <p className="truncate font-medium text-foreground" title={u.title}>
+            <span dir="auto">{u.title}</span>
+          </p>
+          <p className="truncate text-xs text-muted-foreground" title={u.body}>
+            <span dir="auto">{u.body}</span>
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: "account",
+      header: "Account",
+      sortable: true,
+      sortValue: (u) => accountName(u).toLowerCase(),
+      render: (u) => (
+        <span dir="auto" className="block max-w-[12rem] truncate">
+          {accountName(u)}
+        </span>
+      ),
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            key: "organization",
+            header: "Organization",
+            sortable: true,
+            sortValue: (u: AccountAnnouncement) => organizationName(u).toLowerCase(),
+            render: (u: AccountAnnouncement) => (
+              <span dir="auto" className="block max-w-[12rem] truncate">
+                {organizationName(u)}
+              </span>
+            ),
+          } satisfies Column<AccountAnnouncement>,
+        ]
+      : []),
+    {
+      key: "is_active",
+      header: "Status",
+      sortable: true,
+      sortValue: (u) => (u.is_active ? 0 : 1),
+      render: (u) => <Status tone={u.is_active ? "success" : "neutral"} label={u.is_active ? "Active" : "Inactive"} />,
+    },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      render: (u) =>
+        u.created_at ? (
+          <Tooltip content={formatDateTime(u.created_at)}>
+            <span className="whitespace-nowrap text-muted-foreground">{formatRelativeTime(u.created_at)}</span>
+          </Tooltip>
+        ) : (
+          <span className="text-subtle-foreground">—</span>
+        ),
+    },
+    actionsColumn<AccountAnnouncement>(
+      (u) => [
+        { label: "Edit", icon: Pencil, onSelect: () => openEdit(u) },
+        {
+          label: "Delete",
+          icon: Trash2,
+          destructive: true,
+          separatorBefore: true,
+          onSelect: () => {
+            setDeleteError(null);
+            setDeleteId(u.id);
+          },
+        },
+      ],
+      { label: (u) => `Actions for ${u.title}` },
+    ),
+  ];
+
+  const isFiltered = search.trim() !== "" || statusFilter !== "ALL" || orgFilter !== "ALL" || accountFilter !== "ALL";
+  let empty: DataTableEmpty;
+  if (updatesQuery.isError) {
+    empty = {
+      icon: AlertCircle,
+      title: "Couldn't load updates",
+      description: formatUserError(updatesQuery.error),
+      action: (
+        <Button variant="outline" size="sm" onClick={() => void updatesQuery.refetch()}>
+          Try again
+        </Button>
+      ),
+    };
+  } else if (data.length === 0) {
+    empty = {
+      icon: Megaphone,
+      title: "No updates yet",
+      description: "Publish an announcement and agents see it in the widget when they sign in.",
+      action: (
+        <Button size="sm" onClick={openCreate}>
+          <Plus aria-hidden="true" className="h-4 w-4" />
+          Publish update
+        </Button>
+      ),
+    };
+  } else {
+    empty = {
+      title: "No updates match these filters",
+      action: (
+        <Button variant="outline" size="sm" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ),
+    };
+  }
+
+  const deleteTarget = deleteId != null ? data.find((u) => u.id === deleteId) : undefined;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={Bell}
-        title="Account Updates"
-        description="Publish announcements for agents. Updates appear in the widget when agents log in to their account."
+    <Page width="wide">
+      <PageHeading
+        title="Updates"
+        description="Announcements shown in agents' desktop widget when they sign in to their account."
+        meta={
+          isLoading ? (
+            <Skeleton className="h-4 w-16" />
+          ) : updatesQuery.isError ? null : (
+            <span>
+              {formatNumber(data.length)} {data.length === 1 ? "update" : "updates"}
+            </span>
+          )
+        }
         actions={
           <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Update
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            Publish update
           </Button>
         }
       />
 
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search updates…"
-        filters={[
-          {
-            id: "update-status-filter",
-            label: "Status",
-            value: statusFilter,
-            onChange: setStatusFilter,
-            options: [
-              { value: "ALL", label: "All" },
-              { value: "ACTIVE", label: "Active" },
-              { value: "INACTIVE", label: "Inactive" },
-            ],
-          },
-          ...(isSuperAdmin
-            ? [
-                {
-                  id: "update-org-filter",
-                  label: "Organization",
-                  value: orgFilter,
-                  onChange: setOrgFilter,
-                  options: [
-                    { value: "ALL", label: "All organizations" },
-                    ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
-                  ],
-                },
-              ]
-            : []),
-          {
-            id: "update-account-filter",
-            label: "Account",
-            value: accountFilter,
-            onChange: setAccountFilter,
-            options: [
-              { value: "ALL", label: "All accounts" },
-              ...createAccounts.map((a) => ({ value: String(a.id), label: a.name })),
-            ],
-          },
-        ]}
-        onClear={clearFilters}
-        totalCount={data.length}
-        filteredCount={filteredData.length}
-      />
-
-      <DataTable
-        columns={[
-          {
-            key: "account",
-            header: "Account",
-            render: (r: AccountAnnouncement) =>
-              r.account_name ?? accountNameById.get(r.account_id) ?? `Account #${r.account_id}`,
-          },
-          ...(isSuperAdmin
-            ? [
-                {
-                  key: "organization",
-                  header: "Organization",
-                  render: (r: AccountAnnouncement) =>
-                    r.organization_name ??
-                    organizationNameById.get(r.organization_id ?? 0) ??
-                    `Org #${r.organization_id}`,
-                },
-              ]
-            : []),
-          { key: "title", header: "Title", sortable: true },
-          {
-            key: "is_active",
-            header: "Status",
-            render: (r) => <StatusBadge status={r.is_active ? "ACTIVE" : "INACTIVE"} />,
-          },
-          {
-            key: "created_at",
-            header: "Created",
-            sortable: true,
-            render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString() : "—"),
-          },
-          {
-            key: "actions",
-            header: "",
-            render: (r) => (
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEdit(r);
-                  }}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteId(r.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
-              </div>
-            ),
-          },
-        ]}
-        data={filteredData}
-        keyFn={(r) => r.id}
+      <DataTable<AccountAnnouncement>
+        aria-label="Updates"
+        columns={columns}
+        data={updatesQuery.isError ? [] : filteredData}
+        keyFn={(u) => u.id}
         loading={isLoading}
-        emptyMessage={data.length ? "No updates match your search or filters" : "No account updates yet"}
+        empty={empty}
         onRowClick={openEdit}
+        rowLabel={(u) => u.title}
+        itemLabel="updates"
+        defaultSort={{ key: "created_at", dir: "desc" }}
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search title, message or account…"
+            filters={[
+              {
+                id: "update-account-filter",
+                label: "Account",
+                value: accountFilter,
+                onChange: setAccountFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  ...createAccounts.map((a) => ({ value: String(a.id), label: a.name })),
+                ],
+              },
+              {
+                id: "update-status-filter",
+                label: "Status",
+                value: statusFilter,
+                onChange: setStatusFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  { value: "ACTIVE", label: "Active" },
+                  { value: "INACTIVE", label: "Inactive" },
+                ],
+              },
+              {
+                id: "update-org-filter",
+                label: "Organization",
+                value: orgFilter,
+                onChange: setOrgFilter,
+                hidden: !isSuperAdmin,
+                options: [
+                  { value: "ALL", label: "All" },
+                  ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
+                ],
+              },
+            ]}
+            onClear={clearFilters}
+            isFiltered={isFiltered}
+            totalCount={isFiltered ? data.length : undefined}
+            filteredCount={filteredData.length}
+            itemLabel="updates"
+          />
+        }
       />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-lg flex-col overflow-hidden p-0">
-          <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
-            <DialogTitle className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-[#004080]" />
-              {editing ? "Edit Account Update" : "New Account Update"}
-            </DialogTitle>
-          </DialogHeader>
-          <DialogBody className="min-h-0 flex-1 px-6 py-4">
-            <div className="space-y-4">
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="lg">
+        <DialogContent onCloseAutoFocus={returnFocus}>
+          <form onSubmit={onSubmit} noValidate className="contents">
+            <DialogHeader>
+              <DialogTitle>{editing ? "Edit update" : "Publish update"}</DialogTitle>
+              <DialogDescription>
+                {editing ? (
+                  <>
+                    For <bdi className="font-medium text-foreground">{accountName(editing)}</bdi>
+                  </>
+                ) : (
+                  "Agents assigned to the account see this update in the widget."
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <ErrorAlert message={error} />
               {!editing && (
-                <div>
-                  <Label>Account</Label>
-                  <Select
-                    value={form.account_id}
-                    onChange={(e) => setForm({ ...form, account_id: e.target.value })}
-                    className="mt-1"
-                  >
+                <Field label="Account" required hint="Agents assigned to this account will see this update in the widget.">
+                  <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
                     <option value="">Select account…</option>
                     {createAccounts.map((a) => (
                       <option key={a.id} value={a.id}>
@@ -314,76 +442,76 @@ export function AccountUpdatesPage() {
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Agents assigned to this account will see this update in the widget.
-                  </p>
-                </div>
+                </Field>
               )}
-              {editing && (
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  Account:{" "}
-                  <span className="font-medium">
-                    {editing.account_name ?? accountNameById.get(editing.account_id) ?? editing.account_id}
-                  </span>
-                </div>
-              )}
-              <div>
-                <Label>Title</Label>
+              <Field label="Title" required>
                 <Input
+                  dir="auto"
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   placeholder="e.g. New knowledge base articles"
-                  className="mt-1"
                 />
-              </div>
-              <div>
-                <Label>Message</Label>
-                <textarea
+              </Field>
+              <Field label="Message" required>
+                <Textarea
+                  dir="auto"
+                  rows={6}
                   value={form.body}
                   onChange={(e) => setForm({ ...form, body: e.target.value })}
-                  rows={5}
                   placeholder="Write the update message agents will see…"
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="is_active"
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                <Label htmlFor="is_active" className="cursor-pointer font-normal">
-                  Active (visible to agents in the widget)
-                </Label>
-              </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-            </div>
-          </DialogBody>
-          <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => void handleSave()} disabled={createUpdate.isPending || updateUpdate.isPending}>
-              {editing ? "Save" : createUpdate.isPending ? "Creating…" : "Publish"}
-            </Button>
-          </DialogFooter>
+              </Field>
+              <Field
+                orientation="horizontal"
+                label="Active"
+                hint="Visible to agents in the widget. Turn off to hide it without deleting."
+              >
+                <Switch checked={form.is_active} onCheckedChange={(v) => setForm({ ...form, is_active: v === true })} />
+              </Field>
+            </DialogBody>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" loading={createUpdate.isPending || updateUpdate.isPending}>
+                {editing ? "Save changes" : createUpdate.isPending ? "Publishing…" : "Publish"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
       <ConfirmDialog
         open={deleteId != null}
-        title="Delete account update"
+        title="Delete update"
         message="Agents will no longer see this update. This action cannot be undone."
         destructive
+        confirmLabel="Delete"
         loading={deleteUpdate.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={async () => {
-          if (deleteId) await deleteUpdate.mutateAsync(deleteId);
+        loadingLabel="Deleting…"
+        error={deleteError}
+        onCancel={() => {
           setDeleteId(null);
+          setDeleteError(null);
         }}
-      />
-    </div>
+        onConfirm={async () => {
+          if (!deleteId) return;
+          setDeleteError(null);
+          try {
+            await deleteUpdate.mutateAsync(deleteId);
+            toast.success("Update deleted", deleteTarget ? { description: deleteTarget.title } : undefined);
+            setDeleteId(null);
+          } catch (e) {
+            setDeleteError(formatUserError(e));
+          }
+        }}
+      >
+        {deleteTarget && (
+          <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-foreground">
+            <bdi className="font-medium">{deleteTarget.title}</bdi>
+          </p>
+        )}
+      </ConfirmDialog>
+    </Page>
   );
 }

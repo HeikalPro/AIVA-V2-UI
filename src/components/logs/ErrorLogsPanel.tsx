@@ -1,13 +1,28 @@
-import { useMemo, useState } from "react";
-import { RefreshCw, Send } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, RefreshCw, Send, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { DataTable, type Column } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
+import { DataTable, type Column } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Status, type StatusTone } from "@/components/data/status";
+import {
+  CHART_MARGIN,
+  ChartCard,
+  ChartTooltip,
+  alpha,
+  chartAxisProps,
+  chartCursor,
+  chartGridProps,
+  useChartTheme,
+} from "@/components/data/chart";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
+import { toast } from "@/components/ui/toast";
 import { filterRows } from "@/lib/table-filters";
 import { formatUserError } from "@/lib/errors";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import {
   SEVERITY_RANK,
   useErrorLogs,
@@ -18,67 +33,129 @@ import {
 } from "@/hooks/useErrorLogs";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLES } from "@/lib/roles";
-import type { DeveloperNotify } from "@/types/api";
+import { AutoRefreshIndicator } from "@/components/system/AutoRefreshIndicator";
+import { HttpStatusCode, LogTime } from "./log-cells";
 
-function formatWhen(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-}
+/** Display only: mirrors LIVE_LOG_REFETCH_MS in hooks/useLogs (the three error sources poll every 10 s). */
+const ERROR_LOGS_REFRESH_MS = 10_000;
+/** Bars shown in the by-type chart; every type stays reachable through the Type filter. */
+const MAX_CHART_TYPES = 8;
 
-function snippet(text: string | null | undefined, max = 80): string {
-  if (!text) return "—";
-  const t = text.replace(/\s+/g, " ").trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
-}
-
-const SEVERITY_TONE: Record<ErrorSeverity, string> = {
-  info: "bg-slate-100 text-slate-600",
-  warning: "bg-amber-100 text-amber-700",
-  error: "bg-red-100 text-red-700",
-  critical: "bg-rose-200 text-rose-800",
+const SEVERITY: Record<ErrorSeverity, { tone: StatusTone; label: string }> = {
+  info: { tone: "info", label: "Info" },
+  warning: { tone: "warning", label: "Warning" },
+  error: { tone: "danger", label: "Error" },
+  critical: { tone: "danger", label: "Critical" },
 };
 
-function SeverityBadge({ value }: { value: ErrorSeverity }) {
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${SEVERITY_TONE[value]}`}>
-      {value}
-    </span>
-  );
+function SeverityStatus({ value }: { value: ErrorSeverity }) {
+  const s = SEVERITY[value] ?? SEVERITY.error;
+  return <Status tone={s.tone} label={s.label} />;
 }
 
-const SOURCE_TONE: Record<ErrorSource, string> = {
-  SERVER: "bg-red-100 text-red-700",
-  WIDGET: "bg-fuchsia-100 text-fuchsia-700",
-  AI: "bg-sky-100 text-sky-700",
-  RAG: "bg-violet-100 text-violet-700",
+const SOURCE_LABEL: Record<ErrorSource, string> = {
+  SERVER: "Server",
+  WIDGET: "Widget",
+  AI: "AI request",
+  RAG: "Retrieval",
 };
 
 function SourceBadge({ value }: { value: ErrorSource }) {
-  return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${SOURCE_TONE[value]}`}>{value}</span>
-  );
+  return <Badge variant={value === "WIDGET" ? "info" : "neutral"}>{SOURCE_LABEL[value] ?? value}</Badge>;
 }
 
 function contextValue(row: ErrorLogEntry): string {
   return row.endpoint ?? row.model ?? "—";
 }
 
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+function truncateLabel(value: string, max = 22): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function DetailFact({ label, children, mono = false }: { label: string; children: ReactNode; mono?: boolean }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</div>
-      <div className="whitespace-pre-wrap break-words text-sm text-slate-900">{value}</div>
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className={mono ? "mt-0.5 break-all font-mono text-xs text-foreground" : "mt-0.5 break-words text-ui text-foreground"}>{children}</dd>
     </div>
   );
 }
 
-const TEST_TONE: Record<DeveloperNotify["status"], string> = {
-  sent: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  no_recipients: "border-amber-200 bg-amber-50 text-amber-700",
-  disabled: "border-amber-200 bg-amber-50 text-amber-700",
-  failed: "border-red-200 bg-red-50 text-red-700",
-};
+function FailuresByType({
+  typeCounts,
+  typeFilter,
+  onSelect,
+}: {
+  typeCounts: { type: string; count: number }[];
+  typeFilter: string | null;
+  onSelect: (type: string | null) => void;
+}) {
+  const theme = useChartTheme();
+  const data = typeCounts.slice(0, MAX_CHART_TYPES);
+  const more = typeCounts.length - data.length;
+  const color = theme.series[0];
+  const height = Math.max(120, data.length * 30 + 16);
+
+  return (
+    <ChartCard
+      title="Failures by type"
+      description={
+        typeFilter ? (
+          <>
+            Table filtered to <span className="font-medium text-foreground">“{typeFilter}”</span>
+          </>
+        ) : (
+          "Click a bar to filter the table by type."
+        )
+      }
+      height={height}
+      actions={
+        typeFilter ? (
+          <Button variant="ghost" size="sm" onClick={() => onSelect(null)}>
+            <X aria-hidden="true" className="h-4 w-4" />
+            Clear type filter
+          </Button>
+        ) : undefined
+      }
+      footer={
+        more > 0 ? <p className="text-xs text-muted-foreground">+{more} more types: use the Type filter above the table.</p> : undefined
+      }
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} layout="vertical" margin={{ ...CHART_MARGIN, right: 24 }} accessibilityLayer>
+          <CartesianGrid {...chartGridProps(theme)} vertical horizontal={false} />
+          <XAxis type="number" allowDecimals={false} {...chartAxisProps(theme)} />
+          <YAxis
+            type="category"
+            dataKey="type"
+            width={168}
+            interval={0}
+            {...chartAxisProps(theme)}
+            tickFormatter={(value: string) => truncateLabel(String(value))}
+          />
+          <Tooltip
+            cursor={chartCursor(theme, "bar")}
+            isAnimationActive={false}
+            content={<ChartTooltip valueFormatter={(v) => formatNumber(Number(v))} />}
+          />
+          <Bar
+            dataKey="count"
+            name="Failures"
+            radius={[0, 4, 4, 0]}
+            maxBarSize={20}
+            cursor="pointer"
+            isAnimationActive={false}
+            onClick={(d: { type?: string }) => onSelect(d?.type && d.type !== typeFilter ? d.type : null)}
+          >
+            {data.map((t) => (
+              <Cell key={t.type} fill={typeFilter && typeFilter !== t.type ? alpha(color, 0.25) : color} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartCard>
+  );
+}
 
 export function ErrorLogsPanel() {
   const { entries, typeCounts, isLoading, isError, error, isFetching, refetch } = useErrorLogs(true);
@@ -87,15 +164,16 @@ export function ErrorLogsPanel() {
   const canSendTest =
     (user?.roles.includes(ROLES.SUPER_ADMIN) ?? false) || (user?.roles.includes(ROLES.ORG_ADMIN) ?? false);
   const testAlert = useSendTestErrorAlert();
-  const [testResult, setTestResult] = useState<DeveloperNotify | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
 
   function handleSendTest() {
-    setTestResult(null);
-    setTestError(null);
     testAlert.mutate(undefined, {
-      onSuccess: (data) => setTestResult(data),
-      onError: (err) => setTestError(formatUserError(err)),
+      onSuccess: (data) => {
+        const message = data?.message || "Test alert processed.";
+        if (data?.status === "sent") toast.success("Test alert sent", { description: message });
+        else if (data?.status === "failed") toast.error("Test alert failed", { description: message });
+        else toast.warning("Test alert not sent", { description: message });
+      },
+      onError: (err) => toast.error("Couldn't send the test alert", { description: formatUserError(err) }),
     });
   }
 
@@ -111,9 +189,7 @@ export function ErrorLogsPanel() {
         entries,
         search,
         (r) =>
-          [r.type, r.exception, r.user ?? "", r.endpoint ?? "", r.model ?? "", r.requestId ?? "", String(r.conversationId ?? "")].join(
-            " ",
-          ),
+          [r.type, r.exception, r.user ?? "", r.endpoint ?? "", r.model ?? "", r.requestId ?? "", String(r.conversationId ?? "")].join(" "),
         [
           (r) => severityFilter === "ALL" || r.severity === severityFilter,
           (r) => sourceFilter === "ALL" || r.source === sourceFilter,
@@ -129,14 +205,37 @@ export function ErrorLogsPanel() {
       header: "Severity",
       sortable: true,
       sortValue: (r) => SEVERITY_RANK[r.severity],
-      render: (r) => <SeverityBadge value={r.severity} />,
+      render: (r) => <SeverityStatus value={r.severity} />,
     },
-    { key: "type", header: "Type", sortable: true, sortValue: (r) => r.type, render: (r) => <span className="font-medium">{r.type}</span> },
-    { key: "when", header: "When", sortable: true, sortValue: (r) => r.when ?? "", render: (r) => formatWhen(r.when) },
+    { key: "when", header: "Time", sortable: true, sortValue: (r) => r.when ?? "", render: (r) => <LogTime value={r.when} /> },
+    {
+      key: "type",
+      header: "Type",
+      sortable: true,
+      sortValue: (r) => r.type,
+      truncate: true,
+      maxWidth: "14rem",
+      render: (r) => <span className="font-medium text-foreground">{r.type}</span>,
+      cellTitle: (r) => r.type,
+    },
     { key: "source", header: "Source", render: (r) => <SourceBadge value={r.source} /> },
-    { key: "context", header: "Endpoint / Model", render: (r) => snippet(contextValue(r), 42) },
-    { key: "status", header: "Status", render: (r) => (r.statusCode != null ? r.statusCode : "—") },
-    { key: "exception", header: "Message", render: (r) => snippet(r.exception, 70) },
+    {
+      key: "context",
+      header: "Endpoint / model",
+      truncate: true,
+      maxWidth: "16rem",
+      cellTitle: (r) => contextValue(r),
+      render: (r) => <span className="font-mono text-xs">{contextValue(r)}</span>,
+    },
+    { key: "status", header: "HTTP", render: (r) => <HttpStatusCode value={r.statusCode} /> },
+    {
+      key: "exception",
+      header: "Message",
+      truncate: true,
+      maxWidth: "28rem",
+      cellTitle: (r) => r.exception,
+      render: (r) => <span dir="auto">{r.exception}</span>,
+    },
   ];
 
   function clearFilters() {
@@ -146,149 +245,172 @@ export function ErrorLogsPanel() {
     setTypeFilter(null);
   }
 
+  const isFiltered = search.trim() !== "" || severityFilter !== "ALL" || sourceFilter !== "ALL" || typeFilter != null;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
-          Server exceptions (with stack traces) plus failed AI requests and RAG retrievals.
-        </p>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Auto-refreshes every 10s</span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">Server exceptions (with stack traces) plus failed AI requests and knowledge retrievals.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <AutoRefreshIndicator intervalMs={ERROR_LOGS_REFRESH_MS} fetching={isFetching} />
           {canSendTest && (
-            <Button variant="outline" size="sm" onClick={handleSendTest} disabled={testAlert.isPending}>
-              <Send className={`mr-1.5 h-3.5 w-3.5 ${testAlert.isPending ? "animate-pulse" : ""}`} />
+            <Button variant="outline" size="sm" onClick={handleSendTest} loading={testAlert.isPending}>
+              {!testAlert.isPending && <Send aria-hidden="true" className="h-4 w-4" />}
               {testAlert.isPending ? "Sending…" : "Send test alert"}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <IconButton
+            label="Refresh error logs"
+            icon={RefreshCw}
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className={isFetching ? "[&_svg]:motion-safe:animate-spin" : undefined}
+          />
         </div>
       </div>
 
-      {testResult && (
-        <div className={`rounded-lg border px-3 py-2 text-sm ${TEST_TONE[testResult.status]}`}>
-          {testResult.message}
-        </div>
-      )}
-      <ErrorAlert message={testError} />
-
       <ErrorAlert message={isError ? formatUserError(error) : null} />
 
-      {typeCounts.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Failures by type</h4>
-            {typeFilter && (
-              <button type="button" className="text-xs text-primary hover:underline" onClick={() => setTypeFilter(null)}>
-                Clear “{typeFilter}” filter
-              </button>
-            )}
-          </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={typeCounts} margin={{ top: 16, right: 8, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-              <XAxis dataKey="type" tick={{ fontSize: 11, fill: "#64748b" }} interval={0} angle={-12} textAnchor="end" height={50} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} width={32} />
-              <Tooltip cursor={{ fill: "rgba(148,163,184,0.12)" }} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]} onClick={(d: { type?: string }) => setTypeFilter(d?.type ?? null)} cursor="pointer">
-                {typeCounts.map((t) => (
-                  <Cell key={t.type} fill={typeFilter && typeFilter !== t.type ? "#cbd5e1" : "#3b82f6"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="mt-1 text-center text-xs text-muted-foreground">Click a bar to filter the table by type.</p>
-        </div>
+      {(isLoading || typeCounts.length > 0) && (
+        isLoading ? (
+          <ChartCard title="Failures by type" loading height={160} />
+        ) : (
+          <FailuresByType typeCounts={typeCounts} typeFilter={typeFilter} onSelect={setTypeFilter} />
+        )
       )}
 
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search errors…"
-        filters={[
-          {
-            id: "error-severity",
-            label: "Severity",
-            value: severityFilter,
-            onChange: setSeverityFilter,
-            options: [
-              { value: "ALL", label: "All severities" },
-              { value: "info", label: "Info" },
-              { value: "warning", label: "Warning" },
-              { value: "error", label: "Error" },
-              { value: "critical", label: "Critical" },
-            ],
-          },
-          {
-            id: "error-source",
-            label: "Source",
-            value: sourceFilter,
-            onChange: setSourceFilter,
-            options: [
-              { value: "ALL", label: "All sources" },
-              { value: "SERVER", label: "Server exception" },
-              { value: "WIDGET", label: "Widget" },
-              { value: "AI", label: "AI requests" },
-              { value: "RAG", label: "RAG retrieval" },
-            ],
-          },
-        ]}
-        onClear={clearFilters}
-        totalCount={entries.length}
-        filteredCount={rows.length}
-      />
-
-      <DataTable
+      <DataTable<ErrorLogEntry>
+        aria-label="Error logs"
         columns={columns}
         data={rows}
         keyFn={(r) => r.id}
         loading={isLoading}
-        emptyMessage="No failures recorded. 🎉"
+        density="compact"
+        itemLabel="failures"
         onRowClick={(row) => setSelected(row)}
+        empty={
+          isFiltered
+            ? {
+                title: "No failures match these filters",
+                action: (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                ),
+              }
+            : isError
+              ? { icon: AlertCircle, title: "Couldn't load error logs", description: formatUserError(error) }
+              : { icon: CheckCircle2, title: "No failures recorded", description: "Server exceptions and failed AI requests appear here." }
+        }
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search type, message, user, request ID…"
+            filters={[
+              {
+                id: "error-severity",
+                label: "Severity",
+                value: severityFilter,
+                onChange: setSeverityFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  { value: "info", label: "Info" },
+                  { value: "warning", label: "Warning" },
+                  { value: "error", label: "Error" },
+                  { value: "critical", label: "Critical" },
+                ],
+              },
+              {
+                id: "error-source",
+                label: "Source",
+                value: sourceFilter,
+                onChange: setSourceFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  { value: "SERVER", label: "Server exception" },
+                  { value: "WIDGET", label: "Widget" },
+                  { value: "AI", label: "AI requests" },
+                  { value: "RAG", label: "Knowledge retrieval" },
+                ],
+              },
+              {
+                id: "error-type",
+                label: "Type",
+                value: typeFilter ?? "ALL",
+                onChange: (v) => setTypeFilter(v === "ALL" ? null : v),
+                options: [{ value: "ALL", label: "All" }, ...typeCounts.map((t) => ({ value: t.type, label: `${t.type} (${t.count})` }))],
+                hidden: typeCounts.length === 0,
+              },
+            ]}
+            onClear={clearFilters}
+            totalCount={isFiltered ? entries.length : undefined}
+            filteredCount={rows.length}
+            itemLabel="failures"
+          />
+        }
       />
 
-      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-          <DialogHeader className="flex items-start justify-between gap-4">
-            <div>
-              <DialogTitle>{selected?.type ?? "Error details"}</DialogTitle>
-              <p className="mt-1 text-sm text-slate-500">Full context for the selected failure.</p>
-            </div>
-            <DialogClose onClose={() => setSelected(null)} />
+      <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)} size="xl">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="break-words">{selected?.type ?? "Error details"}</DialogTitle>
+            <DialogDescription>Full context for the selected failure.</DialogDescription>
           </DialogHeader>
-          {selected ? (
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <SeverityBadge value={selected.severity} />
+          {selected && (
+            <DialogBody className="space-y-5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <SeverityStatus value={selected.severity} />
                 <SourceBadge value={selected.source} />
                 {selected.statusCode != null && (
-                  <span className="text-xs font-medium text-slate-500">HTTP {selected.statusCode}</span>
+                  <span className="inline-flex items-center gap-1.5 text-ui text-muted-foreground">
+                    HTTP <HttpStatusCode value={selected.statusCode} />
+                  </span>
                 )}
+                {selected.when && <span className="text-ui text-muted-foreground">{formatDateTime(selected.when, { dateStyle: "medium", timeStyle: "medium" })}</span>}
               </div>
-              <DetailRow label="Message" value={selected.exception} />
-              <div className="rounded-lg border border-slate-200 bg-slate-900 p-3">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Stack trace</div>
-                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-100">
-                  {selected.stackTrace ?? "No stack trace — this failure was logged without one (AI/RAG-level failure)."}
-                </pre>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <DetailRow label="When" value={formatWhen(selected.when)} />
-                <DetailRow label="Type" value={selected.type} />
-                <DetailRow label="API endpoint" value={selected.endpoint ?? "—"} />
-                <DetailRow label="Request ID" value={selected.requestId ?? "—"} />
-                <DetailRow label="User" value={selected.user ?? "—"} />
-                <DetailRow
-                  label="Conversation ID"
-                  value={selected.conversationId != null ? `#${selected.conversationId}` : "—"}
-                />
-                <DetailRow label="Model" value={selected.model ?? "—"} />
-                <DetailRow label="Account" value={selected.account ?? "—"} />
-              </div>
-            </div>
-          ) : null}
+
+              <section className="space-y-1.5">
+                <h3 className="text-sm font-semibold text-foreground">Message</h3>
+                <p dir="auto" className="whitespace-pre-wrap break-words rounded-md border border-border bg-surface-muted px-3 py-2 text-ui text-foreground">
+                  {selected.exception}
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h3 className="text-sm font-semibold text-foreground">Stack trace</h3>
+                {selected.stackTrace ? (
+                  <pre className="max-h-[22rem] overflow-auto whitespace-pre rounded-md border border-border bg-surface-muted p-3 font-mono text-xs leading-relaxed text-foreground">
+                    {selected.stackTrace}
+                  </pre>
+                ) : (
+                  <p className="rounded-md border border-dashed border-border px-3 py-2 text-ui text-muted-foreground">
+                    No stack trace: this failure was logged without one (AI / retrieval-level failure).
+                  </p>
+                )}
+              </section>
+
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
+                <DetailFact label="Type">{selected.type}</DetailFact>
+                <DetailFact label="API endpoint" mono>
+                  {selected.endpoint ?? "—"}
+                </DetailFact>
+                <DetailFact label="Request ID" mono>
+                  {selected.requestId ?? "—"}
+                </DetailFact>
+                <DetailFact label="User">{selected.user ?? "—"}</DetailFact>
+                <DetailFact label="Conversation ID" mono>
+                  {selected.conversationId != null ? `#${selected.conversationId}` : "—"}
+                </DetailFact>
+                <DetailFact label="Model" mono>
+                  {selected.model ?? "—"}
+                </DetailFact>
+                <DetailFact label="Account">{selected.account ? <bdi>{selected.account}</bdi> : "—"}</DetailFact>
+              </dl>
+            </DialogBody>
+          )}
         </DialogContent>
       </Dialog>
     </div>

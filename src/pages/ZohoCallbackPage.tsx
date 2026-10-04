@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { AuthShell, authLinkClass } from "@/components/auth/AuthShell";
+import { Alert } from "@/components/ui/alert";
+import { Spinner } from "@/components/ui/spinner";
 import { setTokens } from "@/lib/api-client";
 import { formatUserError } from "@/lib/errors";
 
@@ -40,20 +43,21 @@ export function ZohoCallbackPage() {
   if (ready) return <Navigate to="/" replace />;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-100 bg-white p-8 text-center shadow-lg">
-        <h1 className="text-xl font-bold text-slate-800">Completing sign-in</h1>
-        {error ? (
-          <>
-            <p className="mt-4 text-sm text-red-600">{error}</p>
-            <a href="/login" className="mt-4 inline-block text-sm font-semibold text-[#004080] hover:underline">
+    <AuthShell title="Completing sign-in">
+      {error ? (
+        <div className="space-y-4">
+          <Alert tone="danger" description={error} />
+          <p className="text-center text-sm">
+            <a href="/login" className={authLinkClass}>
               Back to login
             </a>
-          </>
-        ) : (
-          <p className="mt-4 text-sm text-muted-foreground">Finishing Zoho authentication...</p>
-        )}
-      </div>
-    </div>
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-muted px-3 py-3">
+          <Spinner label="Finishing Zoho authentication…" showLabel />
+        </div>
+      )}
+    </AuthShell>
   );
 }

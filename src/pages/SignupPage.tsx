@@ -1,11 +1,13 @@
 import { type FormEvent, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthShell, authLinkClass } from "@/components/auth/AuthShell";
 import { LoginEmailField } from "@/components/auth/LoginEmailField";
+import { FullScreenLoader } from "@/components/shell/full-screen-loader";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { signup, setVerifyEmail } from "@/lib/auth-api";
 import { formatUserError } from "@/lib/errors";
 import { buildLoginEmail } from "@/lib/login-email";
@@ -21,13 +23,7 @@ export function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
-        Loading...
-      </div>
-    );
-  }
+  if (authLoading) return <FullScreenLoader />;
   if (user) return <Navigate to="/" replace />;
 
   async function handleSubmit(e: FormEvent) {
@@ -53,22 +49,20 @@ export function SignupPage() {
 
   return (
     <AuthShell title="Create your account" subtitle="Sign up to use AIVA">
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor="name">Full name</Label>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Full name">
           <Input
             id="name"
+            autoComplete="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             minLength={2}
             autoFocus
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
+        </Field>
         <LoginEmailField localPart={emailLocal} onLocalPartChange={setEmailLocal} />
-        <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
+        <Field label="Password" hint={passwordHint()}>
           <Input
             id="password"
             type="password"
@@ -77,12 +71,9 @@ export function SignupPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-          <p className="text-xs text-slate-400">{passwordHint()}</p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="confirmPassword">Confirm password</Label>
+        </Field>
+        <Field label="Confirm password">
           <Input
             id="confirmPassword"
             type="password"
@@ -91,20 +82,15 @@ export function SignupPage() {
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">
-            {error}
-          </div>
-        )}
-        <Button type="submit" className="h-11 w-full rounded-xl text-sm font-semibold" disabled={loading}>
+        </Field>
+        {error && <Alert tone="danger" description={error} />}
+        <Button type="submit" size="lg" className="w-full" loading={loading}>
           {loading ? "Creating account..." : "Sign up"}
         </Button>
-        <p className="text-center text-sm text-slate-500">
+        <p className="pt-1 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-slate-800 hover:underline">
+          <Link to="/login" className={authLinkClass}>
             Sign in
           </Link>
         </p>

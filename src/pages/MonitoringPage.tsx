@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Info, Loader2, PlugZap, RefreshCw, XCircle, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, History, Info, Lightbulb, PlugZap, RefreshCw, ShieldCheck } from "lucide-react";
 import { formatUserError } from "@/lib/errors";
-import { docIntelUnavailable, formatWhen, stageLabel } from "@/lib/doc-intel";
+import { formatDurationMs, formatNumber } from "@/lib/format";
+import { docIntelUnavailable, stageLabel } from "@/lib/doc-intel";
 import {
   SCHEDULE_TIME_ZONE_LABEL,
   crmStageLabel,
@@ -20,142 +21,282 @@ import {
   useRunHealthChecks,
 } from "@/hooks/useMonitoring";
 import { useSyncSources, useTestSourceConnection } from "@/hooks/useSharePointSync";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable, type Column } from "@/components/shared/DataTable";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { EmptyState } from "@/components/data/empty-state";
+import { Status, type StatusTone } from "@/components/data/status";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import { ConnectionTestResult } from "@/components/doc-intel/ConnectionTestResult";
-import { HealthCard, HealthStatusIndicator } from "@/components/doc-intel/HealthCard";
+import { HealthStatusIndicator, healthComponentIcon } from "@/components/doc-intel/HealthCard";
 import { KeyValueTable } from "@/components/doc-intel/KeyValueTable";
 import { Notice } from "@/components/doc-intel/Notice";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
 import { LastSyncSummary, SourceStatusBadge } from "@/components/doc-intel/SyncBadges";
-import type { ActivityItemOut, FailureItemOut, HealthEventOut, HealthOverviewOut, SourceOut } from "@/types/api";
+import { AutoRefreshIndicator } from "@/components/system/AutoRefreshIndicator";
+import type { ActivityItemOut, FailureItemOut, HealthComponentOut, HealthEventOut, HealthOverviewOut, SourceOut } from "@/types/api";
 
 type TabId = "health" | "failures" | "logs" | "diagnostics";
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: "health", label: "Health" },
-  { id: "failures", label: "Failures" },
-  { id: "logs", label: "Logs" },
-  { id: "diagnostics", label: "Diagnostics" },
-];
 
 const FAILURE_WINDOWS = [1, 7, 30] as const;
 type FailureWindow = (typeof FAILURE_WINDOWS)[number];
 
 const EVENTS_LIMIT = 20;
 const ACTIVITY_LIMIT = 100;
+/** Display only: mirrors MONITORING_REFETCH_MS in hooks/useMonitoring (stored results, never live checks). */
+const MONITORING_REFRESH_MS = 30_000;
 
 function windowLabel(days: number): string {
-  return days === 1 ? "1 day" : `${days} days`;
+  return days === 1 ? "24 hours" : `${days} days`;
 }
 
-function SectionTitle({ children }: { children: string }) {
-  return <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{children}</h2>;
-}
-
-function Placeholder({ children }: { children: string }) {
+function SectionHeading({
+  id,
+  title,
+  description,
+  actions,
+}: {
+  id?: string;
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+}) {
   return (
-    <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">{children}</div>
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div className="min-w-0">
+        <h2 id={id} className="text-base font-semibold text-foreground">
+          {title}
+        </h2>
+        {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
   );
 }
 
-// ---- Overall banner --------------------------------------------------------------------------
+function loadError(title: string, error: unknown, retry: () => void): DataTableEmpty {
+  return {
+    icon: AlertCircle,
+    title,
+    description: formatUserError(error),
+    action: (
+      <Button variant="outline" size="sm" onClick={retry}>
+        Try again
+      </Button>
+    ),
+  };
+}
 
-function OverallBanner({ overview, running }: { overview: HealthOverviewOut; running: boolean }) {
-  const failing = overview.components.filter((c) => c.status === "FAILED").length;
-  const notConfigured = overview.components.filter((c) => c.status === "NOT_CONFIGURED").length;
-  const healthy = overview.overall === "HEALTHY";
-  const title = healthy
-    ? "All systems healthy"
-    : failing > 0
-      ? `${failing} ${failing === 1 ? "component" : "components"} failing`
-      : "Some checks are failing";
-  const facts = [overview.checked_at ? `Last checked ${formatWhen(overview.checked_at)}` : "Not checked yet"];
-  if (notConfigured > 0) facts.push(`${notConfigured} not configured (not counted as failures)`);
-  if (running) facts.push("running checks…");
-  else if (overview.stale) facts.push("results are out of date");
+// ---- Overall status line ---------------------------------------------------------------------
+
+function OverallStatus({
+  overview,
+  loading,
+  running,
+  onRun,
+}: {
+  overview: HealthOverviewOut | undefined;
+  loading: boolean;
+  running: boolean;
+  onRun: () => void;
+}) {
+  let status: ReactNode;
+  const facts: ReactNode[] = [];
+  if (!overview) {
+    status = loading ? <Skeleton className="h-5 w-56" /> : <Status tone="neutral" label="Health status is not available" />;
+  } else {
+    const failing = overview.components.filter((c) => c.status === "FAILED").length;
+    const notConfigured = overview.components.filter((c) => c.status === "NOT_CONFIGURED").length;
+    const healthy = overview.overall === "HEALTHY";
+    const label = healthy
+      ? "All systems operational"
+      : failing > 0
+        ? `${failing} ${failing === 1 ? "component" : "components"} failing`
+        : "Some checks are failing";
+    status = <Status tone={healthy ? "success" : "danger"} label={label} className="text-sm font-semibold" />;
+    facts.push(
+      overview.checked_at ? (
+        <span key="checked">
+          Last check <RelativeTime value={overview.checked_at} />
+        </span>
+      ) : (
+        <span key="checked">Not checked yet</span>
+      ),
+    );
+    facts.push(
+      <span key="count">
+        {formatNumber(overview.components.length - failing - notConfigured)} of {formatNumber(overview.components.length)} healthy
+      </span>,
+    );
+    if (notConfigured > 0) facts.push(<span key="nc">{notConfigured} not configured (not counted as failures)</span>);
+    if (running) facts.push(<span key="run">Running checks…</span>);
+    else if (overview.stale) facts.push(<span key="stale" className="text-warning">Results are out of date</span>);
+  }
 
   return (
     <div
       role="status"
-      className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-        healthy ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"
-      }`}
+      aria-live="polite"
+      className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-lg border border-border bg-card px-4 py-3"
     >
-      {healthy ? (
-        <CheckCircle2 aria-hidden="true" className="h-5 w-5 shrink-0" />
-      ) : (
-        <XCircle aria-hidden="true" className="h-5 w-5 shrink-0" />
-      )}
-      <div className="min-w-0">
-        <p className="font-semibold">{title}</p>
-        <p className="text-xs opacity-90">{facts.join(" · ")}</p>
+      <div className="min-w-0 space-y-1">
+        {status}
+        {facts.length > 0 && (
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            {facts.map((fact, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5">
+                {i > 0 && <span aria-hidden="true">·</span>}
+                {fact}
+              </span>
+            ))}
+          </p>
+        )}
       </div>
+      <Button onClick={onRun} loading={running}>
+        {!running && <RefreshCw aria-hidden="true" className="h-4 w-4" />}
+        {running ? "Running checks…" : "Run checks"}
+      </Button>
     </div>
   );
 }
 
 // ---- Health tab ------------------------------------------------------------------------------
 
+function ComponentCell({ c }: { c: HealthComponentOut }) {
+  const Icon = healthComponentIcon(c.key);
+  const failed = c.status === "FAILED";
+  return (
+    <div className="flex min-w-[14rem] max-w-[36rem] items-start gap-2.5 py-0.5">
+      <Icon aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 space-y-1">
+        <p className="font-medium text-foreground">{c.label}</p>
+        {c.reason && (
+          <p className={failed ? "break-words text-xs text-danger" : "break-words text-xs text-muted-foreground"}>{c.reason}</p>
+        )}
+        {failed && c.suggested_action && (
+          <p className="flex items-start gap-1.5 text-xs text-foreground">
+            <Lightbulb aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0 text-warning" />
+            <span className="min-w-0 break-words">
+              <span className="font-medium">Suggested action: </span>
+              {c.suggested_action}
+            </span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const STATUS_ORDER: Record<string, number> = { FAILED: 0, HEALTHY: 1, NOT_CONFIGURED: 2 };
+
+function ComponentsTable({ overview, loading }: { overview: HealthOverviewOut | undefined; loading: boolean }) {
+  const columns: Column<HealthComponentOut>[] = [
+    { key: "label", header: "Component", sortable: true, sortValue: (c) => c.label.toLowerCase(), render: (c) => <ComponentCell c={c} /> },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      sortValue: (c) => STATUS_ORDER[c.status] ?? 3,
+      render: (c) => <HealthStatusIndicator status={c.status} />,
+    },
+    { key: "latency_ms", header: "Latency", numeric: true, sortable: true, render: (c) => formatDurationMs(c.latency_ms) },
+    { key: "checked_at", header: "Last check", sortable: true, render: (c) => <RelativeTime value={c.checked_at} fallback="Not yet" /> },
+    {
+      key: "last_success_at",
+      header: "Last success",
+      sortable: true,
+      render: (c) => <RelativeTime value={c.last_success_at} fallback="Never" />,
+    },
+    {
+      key: "last_failure_at",
+      header: "Last failure",
+      sortable: true,
+      render: (c) => <RelativeTime value={c.last_failure_at} />,
+    },
+    {
+      key: "consecutive_failures",
+      header: "Failures in a row",
+      numeric: true,
+      sortable: true,
+      render: (c) =>
+        c.consecutive_failures > 0 ? (
+          <span className="font-medium text-danger">{formatNumber(c.consecutive_failures)}</span>
+        ) : (
+          <span className="text-muted-foreground">0</span>
+        ),
+    },
+  ];
+
+  return (
+    <DataTable<HealthComponentOut>
+      aria-label="Component health"
+      columns={columns}
+      data={overview?.components ?? []}
+      keyFn={(c) => c.key}
+      loading={loading && !overview}
+      skeletonRows={6}
+      pagination={false}
+      itemLabel="components"
+      defaultSort={{ key: "status", dir: "asc" }}
+      rowClassName={(c) => (c.status === "FAILED" ? "bg-danger-muted/40 hover:bg-danger-muted/60" : undefined)}
+      empty={{ icon: ShieldCheck, title: "Health status is not available", description: "Run the checks to record the first results." }}
+    />
+  );
+}
+
 function RecentStatusChanges() {
   const events = useHealthEvents(EVENTS_LIMIT);
   const columns: Column<HealthEventOut>[] = [
-    { key: "component", header: "Component", render: (e) => <span className="font-medium text-foreground">{e.label}</span> },
+    { key: "label", header: "Component", render: (e) => <span className="font-medium text-foreground">{e.label}</span> },
     {
       key: "change",
       header: "Change",
       render: (e) => (
         <span className="inline-flex flex-wrap items-center gap-1.5">
           {e.old_status ? (
-            <HealthStatusIndicator status={e.old_status} className="text-xs" />
+            <HealthStatusIndicator status={e.old_status} />
           ) : (
-            <span className="text-xs text-muted-foreground">First check</span>
+            <span className="text-ui text-muted-foreground">First check</span>
           )}
-          <span aria-hidden="true" className="text-muted-foreground">→</span>
+          <span aria-hidden="true" className="text-muted-foreground">
+            →
+          </span>
           <span className="sr-only">changed to</span>
-          <HealthStatusIndicator status={e.new_status} className="text-xs" />
+          <HealthStatusIndicator status={e.new_status} />
         </span>
       ),
     },
-    {
-      key: "reason",
-      header: "Reason",
-      render: (e) => <span className="block min-w-[12rem] max-w-md break-words">{e.reason ?? "—"}</span>,
-    },
-    { key: "when", header: "When", render: (e) => <span className="whitespace-nowrap">{formatWhen(e.created_at)}</span> },
+    { key: "reason", header: "Reason", truncate: true, maxWidth: "32rem", render: (e) => e.reason ?? "—" },
+    { key: "created_at", header: "When", render: (e) => <RelativeTime value={e.created_at} /> },
   ];
 
   return (
-    <section className="space-y-3">
-      <SectionTitle>Recent status changes</SectionTitle>
-      <ErrorAlert message={events.isError ? formatUserError(events.error) : null} />
-      <DataTable
+    <section className="space-y-3" aria-labelledby="monitoring-events-heading">
+      <h2 id="monitoring-events-heading" className="text-base font-semibold text-foreground">
+        Recent status changes
+      </h2>
+      <DataTable<HealthEventOut>
+        aria-label="Recent status changes"
         columns={columns}
-        data={events.data ?? []}
+        data={events.isError ? [] : (events.data ?? [])}
         keyFn={(e) => e.id}
         loading={events.isLoading}
-        emptyMessage="No status changes recorded yet."
+        skeletonRows={4}
+        pagination={false}
+        itemLabel="changes"
+        empty={
+          events.isError
+            ? loadError("Couldn't load status changes", events.error, () => void events.refetch())
+            : { icon: History, title: "No status changes recorded yet", description: "Changes appear when a component turns healthy or failed." }
+        }
       />
     </section>
-  );
-}
-
-function HealthTab({ overview, loading }: { overview: HealthOverviewOut | undefined; loading: boolean }) {
-  return (
-    <div className="space-y-8">
-      {overview ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {overview.components.map((c) => (
-            <HealthCard key={c.key} component={c} />
-          ))}
-        </div>
-      ) : (
-        <Placeholder>{loading ? "Loading health status…" : "Health status is not available."}</Placeholder>
-      )}
-      <RecentStatusChanges />
-    </div>
   );
 }
 
@@ -174,74 +315,135 @@ function failureStageLabel(item: FailureItemOut): string {
 
 function FailuresTab({ days, onDaysChange }: { days: FailureWindow; onDaysChange: (days: FailureWindow) => void }) {
   const failures = useDocIntelFailures(days);
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState("ALL");
+  const items = useMemo(() => failures.data?.items ?? [], [failures.data]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter(
+      (r) =>
+        (kind === "ALL" || r.kind === kind) &&
+        (!q || [r.title, r.account_name ?? "", r.reason ?? "", failureStageLabel(r)].join(" ").toLowerCase().includes(q)),
+    );
+  }, [items, search, kind]);
+  const isFiltered = search.trim() !== "" || kind !== "ALL";
+
   const columns: Column<FailureItemOut>[] = [
     {
       key: "title",
       header: "Item",
       sortable: true,
-      sortValue: (r) => r.title,
+      sortValue: (r) => r.title.toLowerCase(),
       render: (r) => (
-        <div className="min-w-[10rem] max-w-xs">
-          <span className="block break-words font-medium text-foreground">{r.title}</span>
-          <span className="block text-xs text-muted-foreground">{FAILURE_KIND_LABEL[r.kind] ?? r.kind}</span>
+        <div className="min-w-[12rem] max-w-[22rem]">
+          <p className="truncate font-medium text-foreground" title={r.title}>
+            <bdi>{r.title}</bdi>
+          </p>
+          <p className="text-xs text-muted-foreground">{FAILURE_KIND_LABEL[r.kind] ?? r.kind}</p>
         </div>
       ),
     },
-    { key: "account", header: "Account", sortable: true, sortValue: (r) => r.account_name ?? "", render: (r) => r.account_name ?? "—" },
-    { key: "stage", header: "Stage", render: (r) => failureStageLabel(r) },
+    {
+      key: "account",
+      header: "Account",
+      sortable: true,
+      sortValue: (r) => r.account_name ?? "",
+      render: (r) => (r.account_name ? <bdi>{r.account_name}</bdi> : "—"),
+    },
+    { key: "stage", header: "Stage", sortable: true, sortValue: (r) => failureStageLabel(r), render: (r) => failureStageLabel(r) },
     {
       key: "reason",
       header: "Reason",
-      render: (r) => <span className="block min-w-[14rem] max-w-md break-words text-red-700">{r.reason ?? "—"}</span>,
+      truncate: true,
+      maxWidth: "30rem",
+      cellTitle: (r) => r.reason ?? undefined,
+      render: (r) => <span dir="auto">{r.reason ?? "—"}</span>,
     },
     {
-      key: "when",
+      key: "occurred_at",
       header: "Time",
       sortable: true,
       sortValue: (r) => r.occurred_at ?? "",
-      render: (r) => <span className="whitespace-nowrap">{formatWhen(r.occurred_at)}</span>,
+      render: (r) => <RelativeTime value={r.occurred_at} />,
     },
   ];
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Document imports, SharePoint files and SharePoint sync runs that failed in the selected period.
-        </p>
-        <div role="group" aria-label="Time window" className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Last</span>
-          {FAILURE_WINDOWS.map((d) => (
-            <Button
-              key={d}
-              size="sm"
-              variant={d === days ? "default" : "outline"}
-              aria-pressed={d === days}
-              onClick={() => onDaysChange(d)}
-            >
-              {windowLabel(d)}
-            </Button>
-          ))}
-        </div>
-      </div>
-      <ErrorAlert message={failures.isError ? formatUserError(failures.error) : null} />
-      <DataTable
-        columns={columns}
-        data={failures.data?.items ?? []}
-        keyFn={(r) => `${r.kind}-${r.id}`}
-        loading={failures.isLoading}
-        emptyMessage={`No failures in the last ${windowLabel(days)}.`}
-      />
-    </section>
+    <DataTable<FailureItemOut>
+      aria-label="Failures"
+      columns={columns}
+      data={failures.isError ? [] : filtered}
+      keyFn={(r) => `${r.kind}-${r.id}`}
+      loading={failures.isLoading}
+      itemLabel="failures"
+      defaultSort={{ key: "occurred_at", dir: "desc" }}
+      empty={
+        failures.isError
+          ? loadError("Couldn't load failures", failures.error, () => void failures.refetch())
+          : isFiltered
+            ? {
+                title: "No failures match these filters",
+                action: (
+                  <Button variant="outline" size="sm" onClick={() => (setSearch(""), setKind("ALL"))}>
+                    Clear filters
+                  </Button>
+                ),
+              }
+            : {
+                icon: CheckCircle2,
+                title: `No failures in the last ${windowLabel(days)}`,
+                description: "Document imports, SharePoint files and sync runs that fail appear here.",
+              }
+      }
+      toolbar={
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search item, account or reason…"
+          filters={[
+            {
+              id: "failure-kind",
+              label: "Type",
+              value: kind,
+              onChange: setKind,
+              options: [
+                { value: "ALL", label: "All" },
+                { value: "kb_document", label: FAILURE_KIND_LABEL.kb_document },
+                { value: "crm_file", label: FAILURE_KIND_LABEL.crm_file },
+                { value: "sync_run", label: FAILURE_KIND_LABEL.sync_run },
+              ],
+            },
+          ]}
+          onClear={() => {
+            setSearch("");
+            setKind("ALL");
+          }}
+          totalCount={isFiltered ? items.length : undefined}
+          filteredCount={filtered.length}
+          itemLabel="failures"
+          actions={
+            <Tabs variant="segmented" value={String(days)} onValueChange={(v) => onDaysChange(Number(v) as FailureWindow)}>
+              <TabsList aria-label="Time window">
+                {FAILURE_WINDOWS.map((d) => (
+                  <TabsTrigger key={d} value={String(d)}>
+                    {windowLabel(d)}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          }
+        />
+      }
+    />
   );
 }
 
 // ---- Logs tab --------------------------------------------------------------------------------
 
-const LEVEL_META: Record<ActivityItemOut["level"], { icon: LucideIcon; className: string; label: string }> = {
-  info: { icon: Info, className: "text-primary", label: "Info" },
-  warning: { icon: AlertTriangle, className: "text-amber-600", label: "Warning" },
-  error: { icon: XCircle, className: "text-red-600", label: "Error" },
+const LEVEL_META: Record<ActivityItemOut["level"], { tone: StatusTone; label: string }> = {
+  info: { tone: "info", label: "Info" },
+  warning: { tone: "warning", label: "Warning" },
+  error: { tone: "danger", label: "Error" },
 };
 
 const KIND_LABEL: Record<ActivityItemOut["kind"], string> = {
@@ -251,53 +453,90 @@ const KIND_LABEL: Record<ActivityItemOut["kind"], string> = {
   sync_run: "SharePoint sync run",
 };
 
-function LogsTab() {
+function ActivityFeed() {
   const activity = useDocIntelActivity(ACTIVITY_LIMIT);
   const items = activity.data?.items ?? [];
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <SectionTitle>Document intelligence activity</SectionTitle>
-          <Button variant="outline" size="sm" onClick={() => activity.refetch()} disabled={activity.isFetching}>
-            <RefreshCw aria-hidden="true" className={`mr-1.5 h-3.5 w-3.5 ${activity.isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+    <section className="space-y-3" aria-labelledby="monitoring-activity-heading">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 id="monitoring-activity-heading" className="text-base font-semibold text-foreground">
+            Document intelligence activity
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Imports, health checks and SharePoint syncs, newest first.</p>
         </div>
-        <ErrorAlert message={activity.isError ? formatUserError(activity.error) : null} />
+        <Button variant="outline" size="sm" onClick={() => activity.refetch()} disabled={activity.isFetching}>
+          <RefreshCw aria-hidden="true" className={activity.isFetching ? "h-4 w-4 motion-safe:animate-spin" : "h-4 w-4"} />
+          Refresh
+        </Button>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         {activity.isLoading ? (
-          <Placeholder>Loading activity…</Placeholder>
+          <ul aria-busy="true" className="divide-y divide-border">
+            {Array.from({ length: 5 }, (_, i) => (
+              <li key={i} className="flex items-center gap-4 px-4 py-3">
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 flex-1" />
+                <Skeleton className="h-4 w-20" />
+              </li>
+            ))}
+          </ul>
+        ) : activity.isError ? (
+          <EmptyState
+            size="sm"
+            icon={AlertCircle}
+            title="Couldn't load activity"
+            description={formatUserError(activity.error)}
+            action={
+              <Button variant="outline" size="sm" onClick={() => void activity.refetch()}>
+                Try again
+              </Button>
+            }
+          />
         ) : items.length === 0 ? (
-          <Placeholder>No activity recorded yet.</Placeholder>
+          <EmptyState size="sm" icon={Info} title="No activity recorded yet" />
         ) : (
-          <ul className="max-h-[32rem] divide-y divide-border overflow-y-auto rounded-xl border border-border bg-card">
+          <ul className="max-h-[28rem] divide-y divide-border overflow-y-auto">
             {items.map((item, i) => {
               const meta = LEVEL_META[item.level] ?? LEVEL_META.info;
-              const Icon = meta.icon;
               return (
-                <li key={`${item.kind}-${item.ref_id ?? "none"}-${item.occurred_at ?? ""}-${i}`} className="flex items-start gap-3 px-4 py-3">
-                  <Icon aria-hidden="true" className={`mt-0.5 h-4 w-4 shrink-0 ${meta.className}`} />
-                  <div className="min-w-0 flex-1">
-                    <p className="break-words text-sm text-foreground">
-                      <span className="sr-only">{meta.label}: </span>
-                      {item.message}
+                <li
+                  key={`${item.kind}-${item.ref_id ?? "none"}-${item.occurred_at ?? ""}-${i}`}
+                  className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-0.5 px-4 py-2.5 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto]"
+                >
+                  <Status tone={meta.tone} label={meta.label} className="pt-px" />
+                  <div className="min-w-0">
+                    <p className="break-words text-ui text-foreground">
+                      <span dir="auto">{item.message}</span>
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {KIND_LABEL[item.kind] ?? item.kind}
-                      {item.kind !== "health" && item.ref_id != null ? ` #${item.ref_id}` : ""} ·{" "}
-                      {formatWhen(item.occurred_at)}
+                      {item.kind !== "health" && item.ref_id != null && <span className="font-mono"> #{item.ref_id}</span>}
                     </p>
                   </div>
+                  <RelativeTime value={item.occurred_at} className="col-start-2 text-xs text-muted-foreground sm:col-start-3 sm:pt-0.5" />
                 </li>
               );
             })}
           </ul>
         )}
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      <section className="space-y-3">
-        <SectionTitle>Error logs</SectionTitle>
+function LogsTab() {
+  return (
+    <div className="space-y-8">
+      <ActivityFeed />
+      <section className="space-y-3" aria-labelledby="monitoring-errors-heading">
+        <div>
+          <h2 id="monitoring-errors-heading" className="text-base font-semibold text-foreground">
+            Error logs
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Application errors recorded by the backend and the widget.</p>
+        </div>
         <ErrorLogsPanel />
       </section>
     </div>
@@ -318,42 +557,55 @@ function DiagnosticsTab({
   onRun: () => void;
 }) {
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          The raw details each check reported: latency, versions and configuration.
-        </p>
-        <Button variant="outline" size="sm" onClick={onRun} disabled={running}>
-          <RefreshCw aria-hidden="true" className={`mr-1.5 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
+    <section className="space-y-3" aria-labelledby="monitoring-diagnostics-heading">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 id="monitoring-diagnostics-heading" className="text-base font-semibold text-foreground">
+            Check details
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">The raw details each check reported: latency, versions and configuration.</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={onRun} loading={running}>
+          {!running && <RefreshCw aria-hidden="true" className="h-4 w-4" />}
           {running ? "Running…" : "Run diagnostics"}
         </Button>
       </div>
       {!overview ? (
-        <Placeholder>{loading ? "Loading diagnostics…" : "Diagnostics are not available."}</Placeholder>
+        loading ? (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2" aria-busy="true">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-40" />
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <EmptyState size="sm" icon={ShieldCheck} title="Diagnostics are not available" />
+          </Card>
+        )
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {overview.components.map((c) => (
-            <section
-              key={c.key}
-              aria-labelledby={`diag-${c.key}`}
-              className="min-w-0 rounded-xl border border-border bg-card p-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 id={`diag-${c.key}`} className="text-sm font-semibold text-foreground">
-                  {c.label}
-                </h3>
-                <HealthStatusIndicator status={c.status} />
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Checked {c.checked_at ? formatWhen(c.checked_at) : "not yet"}
-                {c.latency_ms != null ? ` · ${c.latency_ms.toLocaleString()} ms` : ""}
-                {c.consecutive_failures > 0 ? ` · ${c.consecutive_failures} consecutive failures` : ""}
-              </p>
-              <div className="mt-3">
-                <KeyValueTable data={c.details} emptyMessage="No diagnostic details reported." />
-              </div>
-            </section>
-          ))}
+          {overview.components.map((c) => {
+            const Icon = healthComponentIcon(c.key);
+            return (
+              <Card key={c.key} className="min-w-0 p-4" aria-labelledby={`diag-${c.key}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 id={`diag-${c.key}`} className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <Icon aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+                    {c.label}
+                  </h3>
+                  <HealthStatusIndicator status={c.status} />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Checked <RelativeTime value={c.checked_at} fallback="not yet" />
+                  {c.latency_ms != null ? ` · ${formatDurationMs(c.latency_ms)}` : ""}
+                  {c.consecutive_failures > 0 ? ` · ${c.consecutive_failures} consecutive failures` : ""}
+                </p>
+                <div className="mt-3 border-t border-border pt-3">
+                  <KeyValueTable data={c.details} emptyMessage="No diagnostic details reported." />
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
     </section>
@@ -364,10 +616,10 @@ function DiagnosticsTab({
 
 function ConnectionFact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <>
-      <dt className="mt-2 text-xs font-medium text-muted-foreground first:mt-0 sm:mt-0 sm:pt-0.5">{label}</dt>
-      <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
-    </>
+    <div className="grid gap-x-4 gap-y-0.5 py-1.5 first:pt-0 last:pb-0 sm:grid-cols-[6.5rem_minmax(0,1fr)]">
+      <dt className="text-xs font-medium leading-5 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-ui text-foreground [overflow-wrap:anywhere]">{children}</dd>
+    </div>
   );
 }
 
@@ -375,16 +627,13 @@ function ConnectionFact({ label, children }: { label: string; children: ReactNod
 function ConnectionCard({ source }: { source: SourceOut }) {
   const test = useTestSourceConnection();
   const problem = test.isError ? describeActionError(test.error, "The connection test") : null;
-  const secret = source.client_secret_set
-    ? `Set${source.secret_updated_at ? ` · updated ${formatWhen(source.secret_updated_at)}` : ""}`
-    : "Not set";
 
   return (
-    <article aria-labelledby={`diag-source-${source.id}`} className="min-w-0 rounded-xl border border-border bg-card p-5">
+    <Card className="min-w-0 p-4" aria-labelledby={`diag-source-${source.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 id={`diag-source-${source.id}`} className="break-words text-sm font-semibold text-foreground">
-            {source.name}
+            <bdi>{source.name}</bdi>
           </h3>
           <p className="text-xs text-muted-foreground">
             {scheduleSummary(source)}
@@ -393,36 +642,44 @@ function ConnectionCard({ source }: { source: SourceOut }) {
         </div>
         <SourceStatusBadge status={source.status} />
       </div>
-      <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[6.5rem_minmax(0,1fr)] sm:gap-y-1.5">
+      <dl className="mt-3 divide-y divide-border border-t border-border pt-3">
         <ConnectionFact label="Site">
-          <span className="[overflow-wrap:anywhere]">{source.site_url || "—"}</span>
+          <span className="font-mono text-xs">{source.site_url || "—"}</span>
         </ConnectionFact>
         <ConnectionFact label="Folder">
-          <span className="[overflow-wrap:anywhere]">
+          <span className="font-mono text-xs">
             {libraryLabel(source.drive_name)} · {folderLabel(source.folder_path)}
           </span>
         </ConnectionFact>
         <ConnectionFact label="Tenant ID">
-          <span className="font-mono text-xs [overflow-wrap:anywhere]">{source.tenant_id || "—"}</span>
+          <span className="font-mono text-xs">{source.tenant_id || "—"}</span>
         </ConnectionFact>
         <ConnectionFact label="Client ID">
-          <span className="font-mono text-xs [overflow-wrap:anywhere]">{source.client_id || "—"}</span>
+          <span className="font-mono text-xs">{source.client_id || "—"}</span>
         </ConnectionFact>
         <ConnectionFact label="Secret">
-          {secret}
-          {source.credentials_readable === false && <span className="text-red-700"> · can't be decrypted</span>}
+          {source.client_secret_set ? (
+            <>
+              Set
+              {source.secret_updated_at && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  · updated <RelativeTime value={source.secret_updated_at} />
+                </span>
+              )}
+            </>
+          ) : (
+            "Not set"
+          )}
+          {source.credentials_readable === false && <span className="text-danger"> · can't be decrypted</span>}
         </ConnectionFact>
         <ConnectionFact label="Last sync">
           <LastSyncSummary source={source} showActive />
         </ConnectionFact>
       </dl>
       <div className="mt-4">
-        <Button variant="outline" size="sm" onClick={() => test.mutate(source.id)} disabled={test.isPending}>
-          {test.isPending ? (
-            <Loader2 aria-hidden="true" className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <PlugZap aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />
-          )}
+        <Button variant="outline" size="sm" onClick={() => test.mutate(source.id)} loading={test.isPending}>
+          {!test.isPending && <PlugZap aria-hidden="true" className="h-4 w-4" />}
           {test.isPending ? "Testing…" : "Test connection"}
         </Button>
       </div>
@@ -436,7 +693,7 @@ function ConnectionCard({ source }: { source: SourceOut }) {
           {test.data && <ConnectionTestResult result={test.data} onDismiss={() => test.reset()} />}
         </div>
       )}
-    </article>
+    </Card>
   );
 }
 
@@ -450,20 +707,27 @@ function ConnectionsSection() {
   const anyActive = list.some((s) => isActiveRun(s.active_run));
 
   return (
-    <section aria-label="Connections" className="space-y-3">
+    <section aria-labelledby="monitoring-connections-heading" className="space-y-3">
       <div>
-        <SectionTitle>Connections</SectionTitle>
-        <p className="mt-1 text-sm text-muted-foreground">
-          SharePoint and OneDrive folders. Test connection checks the credentials, token, site, library, folder and file
-          listing step by step. Secrets are never shown.
+        <h2 id="monitoring-connections-heading" className="text-base font-semibold text-foreground">
+          SharePoint connections
+        </h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Test connection checks the credentials, token, site, library, folder and file listing step by step. Secrets are never
+          shown.
           {anyActive ? " Refreshing every 3 s while a sync runs." : ""}
         </p>
       </div>
       <ErrorAlert message={sources.isError ? `Couldn't load the connections: ${formatUserError(sources.error)}` : null} />
       {sources.isPending ? (
-        <Placeholder>Loading connections…</Placeholder>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2" aria-busy="true">
+          <Skeleton className="h-56" />
+          <Skeleton className="h-56" />
+        </div>
       ) : sources.isError ? null : list.length === 0 ? (
-        <Placeholder>No SharePoint or OneDrive folders are connected.</Placeholder>
+        <Card>
+          <EmptyState size="sm" icon={PlugZap} title="No SharePoint or OneDrive folders are connected" />
+        </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {list.map((s) => (
@@ -480,7 +744,7 @@ function ConnectionsSection() {
 export function MonitoringPage() {
   const [tab, setTab] = useState<TabId>("health");
   const [failureDays, setFailureDays] = useState<FailureWindow>(7);
-  // The overview drives the page banner, so it loads on every tab; everything else loads only on its own tab.
+  // The overview drives the status line, so it loads on every tab; everything else loads only on its own tab.
   const health = useDocIntelHealth();
   const runChecks = useRunHealthChecks();
   const { mutate: runHealthChecks } = runChecks;
@@ -496,20 +760,33 @@ export function MonitoringPage() {
     if (health.data.stale) runHealthChecks();
   }, [health.data, runHealthChecks]);
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={Activity}
-        title="Monitoring"
-        description="Health of the document intelligence services, recent import failures, logs and diagnostics."
-        actions={
-          unavailable ? undefined : (
-            <Button onClick={() => runHealthChecks()} disabled={running}>
-              <RefreshCw aria-hidden="true" className={`mr-2 h-4 w-4 ${running ? "animate-spin" : ""}`} />
-              {running ? "Running checks…" : "Run checks now"}
-            </Button>
-          )
+  /** "Run checks" / "Run diagnostics": same mutation, with transient feedback. */
+  function runNow() {
+    runHealthChecks(undefined, {
+      onSuccess: (data) => {
+        if (data?.throttled) {
+          toast.info("Checks ran moments ago", {
+            description:
+              "The server returned the latest stored results instead of running every check again. Try again in about 30 seconds.",
+          });
+          return;
         }
+        const failing = (data?.components ?? []).filter((c) => c.status === "FAILED");
+        if (failing.length === 0) toast.success("Health checks finished", { description: "All systems operational." });
+        else
+          toast.warning("Health checks finished", {
+            description: `Failing: ${failing.map((c) => c.label).join(", ")}.`,
+          });
+      },
+    });
+  }
+
+  return (
+    <Page width="wide">
+      <PageHeading
+        title="Monitoring"
+        meta={unavailable ? undefined : <AutoRefreshIndicator intervalMs={MONITORING_REFRESH_MS} fetching={health.isFetching} />}
+        description="Health of the document intelligence services, recent import failures, logs and diagnostics."
       />
 
       {unavailable ? (
@@ -518,41 +795,49 @@ export function MonitoringPage() {
         </Notice>
       ) : (
         <>
-          {overview && <OverallBanner overview={overview} running={running} />}
-          {!running && runChecks.data?.throttled && (
-            <Notice tone="info" title="Checks ran moments ago">
-              The server returned the latest stored results instead of running every check again. Try again in about
-              30 seconds.
-            </Notice>
-          )}
+          <OverallStatus overview={overview} loading={health.isLoading} running={running} onRun={runNow} />
           <ErrorAlert message={runChecks.isError ? `Couldn't run the checks: ${formatUserError(runChecks.error)}` : null} />
           <ErrorAlert message={health.isError ? `Couldn't load health status: ${formatUserError(health.error)}` : null} />
 
-          <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-            {TABS.map((t) => (
-              <Button
-                key={t.id}
-                variant={tab === t.id ? "default" : "outline"}
-                size="sm"
-                aria-pressed={tab === t.id}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-              </Button>
-            ))}
-          </div>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
+            <TabsList aria-label="Monitoring views">
+              <TabsTrigger value="health">Health</TabsTrigger>
+              <TabsTrigger value="failures">Failures</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
+            </TabsList>
 
-          {tab === "health" && <HealthTab overview={overview} loading={health.isLoading} />}
-          {tab === "failures" && <FailuresTab days={failureDays} onDaysChange={setFailureDays} />}
-          {tab === "logs" && <LogsTab />}
-          {tab === "diagnostics" && (
-            <>
-              <DiagnosticsTab overview={overview} loading={health.isLoading} running={running} onRun={() => runHealthChecks()} />
+            <TabsContent value="health" className="space-y-8">
+              <section className="space-y-3" aria-labelledby="monitoring-components-heading">
+                <SectionHeading
+                  id="monitoring-components-heading"
+                  title="Components"
+                  description="Stored results of the last check. Polling never triggers live checks; use Run checks for that."
+                />
+                <ComponentsTable overview={overview} loading={health.isLoading} />
+              </section>
+              <RecentStatusChanges />
+            </TabsContent>
+
+            <TabsContent value="failures" className="space-y-3">
+              <SectionHeading
+                title="Failures"
+                description="Document imports, SharePoint files and SharePoint sync runs that failed in the selected period."
+              />
+              <FailuresTab days={failureDays} onDaysChange={setFailureDays} />
+            </TabsContent>
+
+            <TabsContent value="logs">
+              <LogsTab />
+            </TabsContent>
+
+            <TabsContent value="diagnostics" className="space-y-8">
+              <DiagnosticsTab overview={overview} loading={health.isLoading} running={running} onRun={runNow} />
               <ConnectionsSection />
-            </>
-          )}
+            </TabsContent>
+          </Tabs>
         </>
       )}
-    </div>
+    </Page>
   );
 }

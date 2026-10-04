@@ -1,22 +1,27 @@
-import { useMemo, useState } from "react";
-import { GraduationCap, ListChecks, Plus, UserCheck, UserPlus, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Building2, ListChecks, Plus, UserCheck, UserPlus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { formatUserError } from "@/lib/errors";
-import { ROLES, canAccessPermission } from "@/lib/roles";
+import { formatNumber } from "@/lib/format";
+import { canAccessPermission } from "@/lib/roles";
+import { filterRows } from "@/lib/table-filters";
 import { useAgents, usePromoteTrainee } from "@/hooks/useAgents";
 import { useAgentsQueueSummary } from "@/hooks/useKbQueues";
-import { useAccounts } from "@/hooks/useAccounts";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { filterRows } from "@/lib/table-filters";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Status } from "@/components/data/status";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { Avatar } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/components/ui/toast";
 import { TraineeDialog } from "@/components/agents/TraineeDialog";
 import { AgentQueueAccessDialog } from "@/components/agents/AgentQueueAccessDialog";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { OverflowChips } from "@/components/users/OverflowChips";
 import type { User } from "@/types/api";
 
 type AgentTypeFilter = "ALL" | "AGENTS" | "TRAINEES";
@@ -25,24 +30,36 @@ function agentTypeLabel(user: User) {
   return user.is_trainee ? "Trainee" : "Agent";
 }
 
+function displayName(user: User) {
+  return [user.first_name, user.last_name].filter(Boolean).join(" ");
+}
+
 export function AgentsPage() {
   const { user } = useAuth();
-  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
+  const workspace = useWorkspace();
   const canManageAgents = user ? canAccessPermission(user, "agents") : false;
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const [accountId, setAccountId] = useState<number | null>(null);
-  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
-  const { data = [], isLoading } = useAgents(selectedAccountId);
+  const accounts = workspace.accounts;
+  const selectedAccountId = workspace.accountId;
+  const agentsQuery = useAgents(selectedAccountId);
+  const { data = [], isLoading } = agentsQuery;
   const { data: queueSummary } = useAgentsQueueSummary(selectedAccountId);
   const promoteTrainee = usePromoteTrainee();
   const [traineeOpen, setTraineeOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState<AgentTypeFilter>("ALL");
-  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<User | null>(null);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<number | null>(null);
   const [queueAgent, setQueueAgent] = useState<User | null>(null);
   const [queueDialogOpen, setQueueDialogOpen] = useState(false);
+
+  // Filters belong to one account: start clean when the workspace changes.
+  useEffect(() => {
+    setSearch("");
+    setStatusFilter("ALL");
+    setTypeFilter("ALL");
+  }, [selectedAccountId]);
 
   const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
 
@@ -88,232 +105,254 @@ export function AgentsPage() {
     [data, search, statusFilter, typeFilter, accountNameById, queuesByUserId],
   );
 
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const selectedAccount = workspace.account;
+  const accountName = selectedAccount?.name ?? "this account";
+
+  function openPromote(agent: User) {
+    if (!canManageAgents || selectedAccountId == null || !agent.is_trainee) return;
+    setPromoteError(null);
+    setPromoteTarget(agent);
+  }
 
   async function handlePromote(agent: User) {
     if (!canManageAgents || selectedAccountId == null || !agent.is_trainee) return;
-
-    const name = [agent.first_name, agent.last_name].filter(Boolean).join(" ") || agent.email;
-    const confirmed = window.confirm(
-      `Promote ${name} from trainee to full agent on ${selectedAccount?.name ?? "this account"}?`,
-    );
-    if (!confirmed) return;
-
-    setFeedback(null);
+    const name = displayName(agent) || agent.email;
+    setPromoteError(null);
     setPromotingId(agent.id);
     try {
       await promoteTrainee.mutateAsync({ userId: agent.id, accountId: selectedAccountId });
-      setFeedback({ kind: "success", message: `${name} is now a full agent.` });
+      setPromoteTarget(null);
+      toast.success(`${name} is now a full agent.`);
     } catch (e) {
-      setFeedback({ kind: "error", message: formatUserError(e) });
+      setPromoteError(formatUserError(e));
     } finally {
       setPromotingId(null);
     }
   }
 
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+  }
+
+  const columns: Column<User>[] = [
+    { key: "id", header: "ID", numeric: true, sortable: true, defaultHidden: true, width: 72 },
+    {
+      key: "name",
+      header: "Name",
+      sortable: true,
+      sortValue: (u) => (displayName(u) || u.email).toLowerCase(),
+      minWidth: 200,
+      render: (u) => {
+        const name = displayName(u);
+        return (
+          <div className="flex min-w-0 max-w-[18rem] items-center gap-2.5">
+            <Avatar name={name || u.email} size="sm" title={false} />
+            {name ? (
+              <span dir="auto" className="truncate font-medium text-foreground" title={name}>
+                {name}
+              </span>
+            ) : (
+              <span className="truncate text-muted-foreground">No name</span>
+            )}
+          </div>
+        );
+      },
+    },
+    { key: "email", header: "Email", sortable: true, truncate: true, maxWidth: "17rem" },
+    {
+      key: "kb_queues",
+      header: "Queues",
+      render: (u) => {
+        const summary = queuesByUserId.get(u.id);
+        if (!summary) return <span className="text-subtle-foreground">—</span>;
+        if (!summary.isRestricted) {
+          return (
+            <Tooltip content="No supervisor restriction: every queue of the account is allowed">
+              <Badge variant="outline" tabIndex={0} className="text-muted-foreground">
+                All queues
+              </Badge>
+            </Tooltip>
+          );
+        }
+        return (
+          <OverflowChips
+            noun="queues"
+            variant="primary"
+            items={summary.queues.map((q) => ({ key: q.key, label: q.label }))}
+          />
+        );
+      },
+    },
+    {
+      key: "type",
+      header: "Role",
+      sortable: true,
+      sortValue: (u) => agentTypeLabel(u),
+      render: (u) => <Badge variant={u.is_trainee ? "warning" : "neutral"}>{agentTypeLabel(u)}</Badge>,
+    },
+    {
+      key: "accounts",
+      header: "Accounts",
+      defaultHidden: true,
+      render: (u) => (
+        <OverflowChips
+          noun="accounts"
+          items={u.account_ids.map((id) => ({ key: id, label: accountNameById.get(id) ?? `Account #${id}` }))}
+        />
+      ),
+    },
+    { key: "status", header: "Status", sortable: true, render: (u) => <Status value={u.status} /> },
+    ...(canManageAgents
+      ? [
+          actionsColumn<User>(
+            (u) => [
+              {
+                label: "Edit queue access",
+                icon: ListChecks,
+                disabled: selectedAccountId == null,
+                onSelect: () => {
+                  setQueueAgent(u);
+                  setQueueDialogOpen(true);
+                },
+              },
+              {
+                label: promotingId === u.id ? "Promoting…" : "Promote to agent",
+                icon: UserPlus,
+                hidden: !u.is_trainee,
+                disabled: promotingId === u.id || selectedAccountId == null,
+                separatorBefore: true,
+                onSelect: () => openPromote(u),
+              },
+            ],
+            { label: (u) => `Actions for ${u.email}` },
+          ),
+        ]
+      : []),
+  ];
+
+  const isFiltered = search.trim() !== "" || statusFilter !== "ALL";
+  let empty: DataTableEmpty;
+  if (!workspace.isLoading && accounts.length === 0) {
+    empty = {
+      icon: Building2,
+      title: "No accounts available",
+      description: "Ask an admin to assign you to an account.",
+    };
+  } else if (agentsQuery.isError) {
+    empty = {
+      icon: AlertCircle,
+      title: "Couldn't load agents",
+      description: formatUserError(agentsQuery.error),
+      action: (
+        <Button variant="outline" size="sm" onClick={() => void agentsQuery.refetch()}>
+          Try again
+        </Button>
+      ),
+    };
+  } else if (data.length === 0) {
+    empty = {
+      icon: UserCheck,
+      title: "No agents on this account yet",
+      description: canManageAgents ? "Add a trainee to get started." : undefined,
+      action: canManageAgents ? (
+        <Button size="sm" onClick={() => setTraineeOpen(true)}>
+          <Plus aria-hidden="true" className="h-4 w-4" />
+          Add trainee
+        </Button>
+      ) : undefined,
+    };
+  } else {
+    empty = {
+      title:
+        typeFilter === "TRAINEES"
+          ? "No trainees match these filters"
+          : typeFilter === "AGENTS"
+            ? "No agents match these filters"
+            : "No agents match your search",
+      action: isFiltered ? (
+        <Button variant="outline" size="sm" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ) : undefined,
+    };
+  }
+
+  const promoteName = promoteTarget ? displayName(promoteTarget) || promoteTarget.email : "";
+  const listLoading = workspace.isLoading || isLoading;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={UserCheck}
+    <Page width="wide">
+      <PageHeading
         title="Agents & Trainees"
         description={
           selectedAccount
-            ? `Agents assigned to ${selectedAccount.name}`
-            : "View and onboard agent accounts for your team"
+            ? `Agents and trainees on ${selectedAccount.name}, and the knowledge-base queues they can use.`
+            : "View and onboard agent accounts for your team."
         }
         actions={
           canManageAgents ? (
             <Button onClick={() => setTraineeOpen(true)} disabled={accounts.length === 0}>
-              <Plus className="mr-2 h-4 w-4" /> New Trainee
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              Add trainee
             </Button>
           ) : undefined
         }
       />
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="min-w-[220px]">
-          <Label>Account</Label>
-          <Select
-            value={selectedAccountId != null ? String(selectedAccountId) : ""}
-            onChange={(e) => setAccountId(Number(e.target.value))}
-            className="mt-1"
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        {(
-          [
-            { id: "ALL" as const, label: "All", count: typeCounts.all, icon: Users },
-            { id: "AGENTS" as const, label: "Agents", count: typeCounts.agents, icon: UserCheck },
-            { id: "TRAINEES" as const, label: "Trainees", count: typeCounts.trainees, icon: GraduationCap },
-          ] as const
-        ).map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <Button
-              key={tab.id}
-              variant={typeFilter === tab.id ? "default" : "outline"}
-              size="sm"
-              onClick={() => setTypeFilter(tab.id)}
-            >
-              <Icon className="mr-2 h-4 w-4" />
-              {tab.label}
-              <Badge variant="muted" className="ml-2 text-[10px] tabular-nums">
-                {tab.count}
-              </Badge>
-            </Button>
-          );
-        })}
-      </div>
-
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search by email, name, or account…"
-        filters={[
-          {
-            id: "agent-status-filter",
-            label: "Status",
-            value: statusFilter,
-            onChange: setStatusFilter,
-            options: [
-              { value: "ALL", label: "All statuses" },
-              { value: "ACTIVE", label: "Active" },
-              { value: "INACTIVE", label: "Inactive" },
-            ],
-          },
-        ]}
-        onClear={() => {
-          setSearch("");
-          setStatusFilter("ALL");
-        }}
-        totalCount={data.length}
-        filteredCount={filteredData.length}
-      />
-
       <DataTable<User>
-        columns={[
-          { key: "id", header: "ID", sortable: true },
-          {
-            key: "type",
-            header: "Type",
-            sortable: true,
-            render: (r) => (
-              <Badge variant={r.is_trainee ? "warning" : "default"}>
-                {agentTypeLabel(r)}
-              </Badge>
-            ),
-          },
-          { key: "email", header: "Email", sortable: true },
-          {
-            key: "name",
-            header: "Name",
-            render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "—",
-          },
-          {
-            key: "accounts",
-            header: "Accounts",
-            render: (r) => (
-              <div className="flex flex-wrap gap-1">
-                {r.account_ids.length
-                  ? r.account_ids.map((id) => (
-                      <Badge key={id} variant="muted">
-                        {accountNameById.get(id) ?? `Account #${id}`}
-                      </Badge>
-                    ))
-                  : "—"}
-              </div>
-            ),
-          },
-          { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-          {
-            key: "kb_queues",
-            header: "KB Queues",
-            render: (r) => {
-              const summary = queuesByUserId.get(r.id);
-              if (!summary) return "—";
-              if (!summary.isRestricted) {
-                return (
-                  <Badge variant="muted" title="No supervisor restriction — all queues allowed">
-                    All queues
-                  </Badge>
-                );
-              }
-              return (
-                <div className="flex flex-wrap gap-1">
-                  {summary.queues.map((q) => (
-                    <Badge key={q.key} variant="default">
-                      {q.label}
-                    </Badge>
-                  ))}
-                </div>
-              );
-            },
-          },
-          ...(canManageAgents
-            ? [
+        aria-label="Agents and trainees"
+        columns={columns}
+        data={agentsQuery.isError ? [] : filteredData}
+        keyFn={(u) => u.id}
+        loading={listLoading}
+        empty={empty}
+        rowLabel={(u) => u.email}
+        itemLabel={typeFilter === "TRAINEES" ? "trainees" : "agents"}
+        enableColumnVisibility
+        persistKey="agents"
+        toolbar={
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs variant="segmented" value={typeFilter} onValueChange={(v) => setTypeFilter(v as AgentTypeFilter)}>
+              <TabsList aria-label="Agent type">
+                <TabsTrigger value="ALL" count={listLoading ? undefined : formatNumber(typeCounts.all)}>
+                  All
+                </TabsTrigger>
+                <TabsTrigger value="AGENTS" count={listLoading ? undefined : formatNumber(typeCounts.agents)}>
+                  Agents
+                </TabsTrigger>
+                <TabsTrigger value="TRAINEES" count={listLoading ? undefined : formatNumber(typeCounts.trainees)}>
+                  Trainees
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <FilterBar
+              className="min-w-0 flex-1"
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search name, email, queue or account…"
+              filters={[
                 {
-                  key: "actions",
-                  header: "",
-                  render: (r: User) => (
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setQueueAgent(r);
-                          setQueueDialogOpen(true);
-                        }}
-                        disabled={selectedAccountId == null}
-                      >
-                        <ListChecks className="mr-2 h-4 w-4" />
-                        Queues
-                      </Button>
-                      {r.is_trainee ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handlePromote(r)}
-                          disabled={promotingId === r.id || selectedAccountId == null}
-                        >
-                          <UserPlus className="mr-2 h-4 w-4" />
-                          {promotingId === r.id ? "Promoting…" : "Promote to agent"}
-                        </Button>
-                      ) : null}
-                    </div>
-                  ),
+                  id: "agent-status-filter",
+                  label: "Status",
+                  value: statusFilter,
+                  onChange: setStatusFilter,
+                  options: [
+                    { value: "ALL", label: "All" },
+                    { value: "ACTIVE", label: "Active" },
+                    { value: "INACTIVE", label: "Inactive" },
+                  ],
                 },
-              ]
-            : []),
-        ]}
-        data={filteredData}
-        keyFn={(r) => r.id}
-        loading={isLoading}
-        emptyMessage={
-          accounts.length === 0
-            ? "No accounts available. Ask an admin to assign you to an account."
-            : data.length
-              ? typeFilter === "TRAINEES"
-                ? "No trainees match your filters"
-                : typeFilter === "AGENTS"
-                  ? "No agents match your filters"
-                  : "No agents match your search"
-              : "No agents on this account yet — add a trainee to get started"
+              ]}
+              onClear={clearFilters}
+              isFiltered={isFiltered}
+              totalCount={isFiltered ? data.length : undefined}
+              filteredCount={filteredData.length}
+              itemLabel="agents"
+            />
+          </div>
         }
       />
-
-      {feedback && (
-        <p className={`text-sm ${feedback.kind === "success" ? "text-emerald-700" : "text-red-600"}`}>
-          {feedback.message}
-        </p>
-      )}
 
       <TraineeDialog
         open={traineeOpen}
@@ -328,6 +367,24 @@ export function AgentsPage() {
         agent={queueAgent}
         accountId={selectedAccountId}
       />
-    </div>
+
+      <ConfirmDialog
+        open={promoteTarget != null}
+        title="Promote to agent?"
+        message={`Promote ${promoteName} from trainee to full agent on ${accountName}?`}
+        confirmLabel="Promote to agent"
+        loading={promoteTarget != null && promotingId === promoteTarget.id}
+        loadingLabel="Promoting…"
+        error={promoteError}
+        onCancel={() => {
+          if (promotingId != null) return;
+          setPromoteTarget(null);
+          setPromoteError(null);
+        }}
+        onConfirm={() => {
+          if (promoteTarget) void handlePromote(promoteTarget);
+        }}
+      />
+    </Page>
   );
 }

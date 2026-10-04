@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthShell, authLinkClass } from "@/components/auth/AuthShell";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { clearVerifyEmail, getVerifyEmail, resetPassword } from "@/lib/auth-api";
 import { formatUserError } from "@/lib/errors";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-hint";
@@ -39,33 +40,31 @@ export function ResetPasswordPage() {
 
   return (
     <AuthShell title="Reset password" subtitle="Enter the code from your email and choose a new password.">
-      <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Email">
           <Input
             id="email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="otp">Reset code</Label>
+        </Field>
+        <Field label="Reset code" hint="6 digits">
           <Input
             id="otp"
             inputMode="numeric"
+            autoComplete="one-time-code"
             pattern="[0-9]{6}"
             maxLength={6}
             value={otp}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
             required
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 text-center text-lg tracking-widest focus:bg-white"
+            className="h-11 text-center font-mono text-lg tracking-[0.4em]"
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="password">New password</Label>
+        </Field>
+        <Field label="New password">
           <Input
             id="password"
             type="password"
@@ -74,11 +73,9 @@ export function ResetPasswordPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="confirmPassword">Confirm new password</Label>
+        </Field>
+        <Field label="Confirm new password">
           <Input
             id="confirmPassword"
             type="password"
@@ -87,19 +84,14 @@ export function ResetPasswordPage() {
             onChange={(e) => setConfirmPassword(e.target.value)}
             required
             minLength={PASSWORD_MIN_LENGTH}
-            className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
           />
-        </div>
-        {error && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">
-            {error}
-          </div>
-        )}
-        <Button type="submit" className="h-11 w-full rounded-xl text-sm font-semibold" disabled={loading}>
+        </Field>
+        {error && <Alert tone="danger" description={error} />}
+        <Button type="submit" size="lg" className="w-full" loading={loading}>
           {loading ? "Updating..." : "Update password"}
         </Button>
-        <p className="text-center text-sm text-slate-500">
-          <Link to="/login" className="font-medium text-slate-800 hover:underline">
+        <p className="pt-1 text-center text-sm">
+          <Link to="/login" className={authLinkClass}>
             Back to sign in
           </Link>
         </p>

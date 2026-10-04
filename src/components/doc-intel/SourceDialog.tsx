@@ -1,5 +1,4 @@
-import { useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useCreateSource, useUpdateSource } from "@/hooks/useSharePointSync";
 import {
@@ -14,10 +13,22 @@ import {
   type ScheduleDraft,
 } from "@/lib/sharepoint-sync";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FormSection } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "@/components/ui/toast";
+import { ToggleChip } from "@/components/widget-config/ToggleChip";
 import { Notice } from "@/components/doc-intel/Notice";
 import { SecretBadge } from "@/components/doc-intel/SyncBadges";
 import { SyncScheduleField } from "@/components/doc-intel/SyncScheduleField";
@@ -167,55 +178,6 @@ function updateBody(draft: Draft, secret: string, source: SourceOut): SourceUpda
   return body;
 }
 
-function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <div>
-        <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{title}</h3>
-        {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Field({
-  id,
-  label,
-  optional = false,
-  hint,
-  warning,
-  error,
-  children,
-}: {
-  id: string;
-  label: string;
-  optional?: boolean;
-  hint?: ReactNode;
-  warning?: string | null;
-  error?: string | null;
-  children: ReactNode;
-}) {
-  const message = error ?? warning ?? hint;
-  return (
-    <div className="min-w-0 space-y-1">
-      <Label htmlFor={id}>
-        {label}
-        {optional && <span className="ml-1 font-normal text-muted-foreground">(optional)</span>}
-      </Label>
-      {children}
-      {message ? (
-        <p
-          id={`${id}-msg`}
-          className={`text-xs ${error ? "text-red-600" : warning ? "text-amber-700" : "text-muted-foreground"}`}
-        >
-          {message}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 type Props = {
   /** The source to edit; null to connect a new folder. */
   source: SourceOut | null;
@@ -297,6 +259,7 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
       setSecret("");
       create.reset();
       update.reset();
+      toast.success(editing ? "Source updated" : "Folder connected", { description: saved?.name ?? draft.name.trim() });
       onSaved?.(saved);
       onClose();
     } catch (err) {
@@ -307,38 +270,46 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
     }
   }
 
-  const describedBy = (key: FieldKey | "site", has: boolean) => (has ? `${ids(key)}-msg` : undefined);
+  const siteWarning = draft.siteUrl.trim() ? (siteCheck.warning ?? (submitted ? null : siteCheck.error)) : null;
+  const optional = (label: string) => (
+    <>
+      {label} <span className="font-normal text-muted-foreground">(optional)</span>
+    </>
+  );
 
   return (
-    <Dialog open onOpenChange={(open) => !open && close()} size="max-w-2xl">
-      <DialogContent className="flex max-h-[min(92vh,calc(100dvh-2rem))] flex-col overflow-hidden">
-        <DialogHeader className="border-b border-slate-100 pb-4">
+    <Dialog open onOpenChange={(open) => !open && close()} size="lg">
+      <DialogContent>
+        <DialogHeader>
           <DialogTitle className="break-words">{editing ? `Edit “${source.name}”` : "Connect a SharePoint folder"}</DialogTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <DialogDescription>
             {editing
               ? "Changes apply to the next sync. Leave the client secret blank to keep the stored one."
               : "AIVA reads the folder with a Microsoft Entra app (read-only) and extracts CRM entities from its files."}
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <form id={ids("form")} onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
-          <DialogBody className="min-h-0 flex-1 space-y-8 pr-1">
+          <DialogBody className="space-y-6">
             {!secretsKeyConfigured && (
               <Notice tone="danger" title="Set DOC_INTEL_SECRETS_KEY on the server before saving credentials">
-                Credentials are stored encrypted with this key. Until it is set and the backend restarted, saving a
-                client secret, Tenant ID or Client ID fails.
+                Credentials are stored encrypted with this key. Until it is set and the backend restarted, saving a client secret,
+                Tenant ID or Client ID fails.
               </Notice>
             )}
             {unreadable && (
               <Notice tone="warning" title="The stored credentials can't be decrypted">
-                The server's encryption key is missing or was rotated. Enter the Tenant ID, Client ID and client secret
-                again to repair this source.
+                The server's encryption key is missing or was rotated. Enter the Tenant ID, Client ID and client secret again to
+                repair this source.
               </Notice>
             )}
 
-            <Section title="Source">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field id={ids("name")} label="Name" error={shownErrors.name}>
+            <FormSection
+              title="Connection"
+              description="A Microsoft Entra app registration with the Sites.Read.All and Files.Read.All application permissions (admin consent granted)."
+            >
+              <FieldGroup columns={2}>
+                <Field label="Name" htmlFor={ids("name")} error={shownErrors.name} required>
                   <Input
                     id={ids("name")}
                     value={draft.name}
@@ -346,24 +317,11 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     placeholder="Sales contracts"
                     maxLength={200}
                     disabled={saving}
-                    aria-invalid={shownErrors.name ? true : undefined}
-                    aria-describedby={describedBy("name", !!shownErrors.name)}
                   />
                 </Field>
-                <Field
-                  id={ids("account")}
-                  label="Account"
-                  optional
-                  hint="The AIVA account the extracted CRM entities belong to."
-                >
-                  <Select
-                    id={ids("account")}
-                    value={draft.accountId}
-                    onChange={(e) => set("accountId", e.target.value)}
-                    disabled={saving}
-                    aria-describedby={`${ids("account")}-msg`}
-                  >
-                    <option value="">{accounts.isLoading ? "Loading accounts…" : "None"}</option>
+                <Field label={optional("Account")} htmlFor={ids("account")} hint="The AIVA account the extracted CRM entities belong to.">
+                  <Select id={ids("account")} value={draft.accountId} onChange={(e) => set("accountId", e.target.value)} disabled={saving}>
+                    <option value="">None</option>
                     {accountOptions.map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label}
@@ -371,20 +329,7 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     ))}
                   </Select>
                 </Field>
-              </div>
-            </Section>
-
-            <Section
-              title="Microsoft Entra app"
-              description="An app registration with the Sites.Read.All and Files.Read.All application permissions (admin consent granted)."
-            >
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  id={ids("tenant")}
-                  label="Tenant ID"
-                  hint="Directory (tenant) ID"
-                  error={shownErrors.tenantId}
-                >
+                <Field label="Tenant ID" htmlFor={ids("tenant")} hint="Directory (tenant) ID" error={shownErrors.tenantId}>
                   <Input
                     id={ids("tenant")}
                     value={draft.tenantId}
@@ -394,17 +339,10 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     autoComplete="off"
                     spellCheck={false}
                     disabled={saving}
-                    className="font-mono"
-                    aria-invalid={shownErrors.tenantId ? true : undefined}
-                    aria-describedby={`${ids("tenant")}-msg`}
+                    className="font-mono text-ui"
                   />
                 </Field>
-                <Field
-                  id={ids("client")}
-                  label="Client ID"
-                  hint="Application (client) ID"
-                  error={shownErrors.clientId}
-                >
+                <Field label="Client ID" htmlFor={ids("client")} hint="Application (client) ID" error={shownErrors.clientId}>
                   <Input
                     id={ids("client")}
                     value={draft.clientId}
@@ -414,23 +352,17 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     autoComplete="off"
                     spellCheck={false}
                     disabled={saving}
-                    className="font-mono"
-                    aria-invalid={shownErrors.clientId ? true : undefined}
-                    aria-describedby={`${ids("client")}-msg`}
+                    className="font-mono text-ui"
                   />
                 </Field>
-              </div>
+              </FieldGroup>
               <Field
-                id={ids("secret")}
                 label="Client secret"
+                htmlFor={ids("secret")}
                 error={shownErrors.secret}
                 hint="The secret's Value (not its ID) from Certificates & secrets. Write-only: it is stored encrypted and never shown again."
+                labelAction={editing && source.client_secret_set ? <SecretBadge source={source} /> : undefined}
               >
-                {editing && source.client_secret_set && (
-                  <div className="pb-1">
-                    <SecretBadge source={source} />
-                  </div>
-                )}
                 <Input
                   id={ids("secret")}
                   type="password"
@@ -445,19 +377,22 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                   placeholder={editing ? "Leave blank to keep the current secret" : "Paste the client secret"}
                   maxLength={1024}
                   disabled={saving}
-                  aria-invalid={shownErrors.secret ? true : undefined}
-                  aria-describedby={`${ids("secret")}-msg`}
                 />
               </Field>
-            </Section>
+            </FormSection>
 
-            <Section title="Folder to sync">
+            <FormSection title="Location" description="The SharePoint site, library and folder to read.">
               <Field
-                id={ids("site")}
                 label="Site URL"
+                htmlFor={ids("site")}
                 error={shownErrors.siteUrl}
-                warning={draft.siteUrl.trim() ? (siteCheck.warning ?? (submitted ? null : siteCheck.error)) : null}
-                hint="The SharePoint site (https://…sharepoint.com/sites/…) or a OneDrive for Business site."
+                hint={
+                  siteWarning && !shownErrors.siteUrl ? (
+                    <span className="text-warning">{siteWarning}</span>
+                  ) : (
+                    "The SharePoint site (https://…sharepoint.com/sites/…) or a OneDrive for Business site."
+                  )
+                }
               >
                 <Input
                   id={ids("site")}
@@ -470,18 +405,11 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                   autoComplete="off"
                   spellCheck={false}
                   disabled={saving}
-                  aria-invalid={shownErrors.siteUrl ? true : undefined}
-                  aria-describedby={`${ids("site")}-msg`}
+                  className="font-mono text-ui"
                 />
               </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  id={ids("drive")}
-                  label="Library"
-                  optional
-                  error={shownErrors.driveName}
-                  hint="Leave empty for the site's default library."
-                >
+              <FieldGroup columns={2}>
+                <Field label={optional("Library")} htmlFor={ids("drive")} error={shownErrors.driveName} hint="Leave empty for the site's default library.">
                   <Input
                     id={ids("drive")}
                     value={draft.driveName}
@@ -490,13 +418,11 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     maxLength={200}
                     autoComplete="off"
                     disabled={saving}
-                    aria-describedby={`${ids("drive")}-msg`}
                   />
                 </Field>
                 <Field
-                  id={ids("folder")}
-                  label="Folder path"
-                  optional
+                  label={optional("Folder path")}
+                  htmlFor={ids("folder")}
                   error={shownErrors.folderPath}
                   hint="Inside the library. Leave empty for the whole library."
                 >
@@ -509,56 +435,41 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                     autoComplete="off"
                     spellCheck={false}
                     disabled={saving}
-                    aria-describedby={`${ids("folder")}-msg`}
+                    className="font-mono text-ui"
                   />
                 </Field>
-              </div>
-              <label className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={draft.recursive}
-                  onChange={(e) => set("recursive", e.target.checked)}
-                  disabled={saving}
-                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 accent-primary"
-                />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-slate-700">Include subfolders</span>
-                  <span className="block text-xs text-muted-foreground">Also sync files in folders below this one.</span>
-                </span>
-              </label>
+              </FieldGroup>
+              <Field orientation="horizontal" label="Include subfolders" htmlFor={ids("recursive")} hint="Also sync files in folders below this one.">
+                <Switch id={ids("recursive")} checked={draft.recursive} onCheckedChange={(on) => set("recursive", on)} disabled={saving} />
+              </Field>
+            </FormSection>
+
+            <FormSection
+              title="Processing"
+              description="Matching files are downloaded, extracted and run through CRM intelligence and entity extraction."
+            >
               <div role="group" aria-labelledby={ids("types")} className="space-y-2">
-                <span id={ids("types")} className="block text-sm font-medium text-slate-700">
-                  File types
-                </span>
+                <Label id={ids("types")}>File types</Label>
                 <div className="flex flex-wrap gap-2">
                   {SYNC_FILE_TYPES.map(({ ext, label }) => {
                     const on = draft.extensions.includes(ext);
                     return (
-                      <button
+                      <ToggleChip
                         key={ext}
-                        type="button"
-                        aria-pressed={on}
+                        pressed={on}
                         disabled={saving}
-                        onClick={() =>
-                          set("extensions", on ? draft.extensions.filter((x) => x !== ext) : [...draft.extensions, ext])
-                        }
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${
-                          on
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                        }`}
+                        onPressedChange={() => set("extensions", on ? draft.extensions.filter((x) => x !== ext) : [...draft.extensions, ext])}
                       >
-                        {on && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
                         {label}
-                      </button>
+                      </ToggleChip>
                     );
                   })}
                 </div>
-                {shownErrors.extensions && <p className="text-xs text-red-600">{shownErrors.extensions}</p>}
+                {shownErrors.extensions && <p className="text-xs font-medium text-danger">{shownErrors.extensions}</p>}
               </div>
-            </Section>
+            </FormSection>
 
-            <Section title="Schedule">
+            <FormSection title="Schedule">
               <SyncScheduleField
                 value={draft.schedule}
                 onChange={(schedule) => set("schedule", schedule)}
@@ -568,7 +479,7 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
                 schedulerEnabled={schedulerEnabled}
                 disabled={saving}
               />
-            </Section>
+            </FormSection>
 
             {problem && (
               <Notice tone={problem.tone} title={problem.title}>
@@ -577,17 +488,16 @@ export function SourceDialog({ source, secretsKeyConfigured = true, schedulerEna
             )}
           </DialogBody>
 
-          <DialogFooter className="flex-wrap items-center border-t border-slate-100 pt-4">
+          <DialogFooter>
             {submitted && hasErrors ? (
-              <p className="mr-auto text-xs text-red-600">Fix the highlighted fields.</p>
+              <p className="mr-auto text-xs font-medium text-danger">Fix the highlighted fields.</p>
             ) : noChanges ? (
               <p className="mr-auto text-xs text-muted-foreground">No changes yet.</p>
             ) : null}
             <Button type="button" variant="outline" onClick={close} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving || noChanges}>
-              {saving && <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />}
+            <Button type="submit" disabled={noChanges} loading={saving}>
               {saving ? "Saving…" : editing ? "Save changes" : "Connect folder"}
             </Button>
           </DialogFooter>

@@ -2,48 +2,209 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * AIVA Control design tokens.
+ * Colors are HSL channels ("H S% L%") consumed as hsl(var(--x) / <alpha>) by
+ * tailwind.config.js, so opacity modifiers such as bg-primary/10 work.
+ * :root / .theme-light = light theme, .dark / .theme-dark = dark theme.
+ * .theme-light / .theme-dark force a theme for a subtree (e.g. the light-only
+ * widget preview inside a dark console). Avoid dark: variants in components;
+ * reference the semantic tokens instead.
+ */
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 15%;
-    --card: 0 0% 100%;
-    --card-foreground: 215 25% 15%;
-    --primary: 204 100% 39%;
-    --primary-foreground: 0 0% 100%;
-    --primary-hover: 204 100% 32%;
-    --secondary: 210 30% 96%;
-    --secondary-foreground: 215 25% 20%;
-    --muted: 210 25% 94%;
-    --muted-foreground: 215 15% 45%;
-    --accent: 204 70% 92%;
-    --accent-foreground: 204 100% 32%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 210 20% 90%;
-    --input: 210 20% 92%;
-    --ring: 204 100% 39%;
-    --radius: 0.5rem;
+    /* Raw company-blue scale (palette reference; prefer semantic tokens) */
+    --brand-50: 205.7 70% 96.1%; /* #EEF6FC */
+    --brand-100: 206.3 69.6% 91%; /* #D8EAF8 */
+    --brand-200: 207.1 68.9% 82.4%; /* #B3D5F1 */
+    --brand-300: 206.5 67.1% 70.2%; /* #80B9E6 */
+    --brand-400: 206.1 63.9% 55.5%; /* #4597D6 */
+    --brand-500: 205 76.9% 44.1%; /* #1A7FC7 */
+    --brand-600: 204.4 100% 36.7%; /* #006FBB */
+    --brand-700: 206 100% 32.5%; /* #005EA6 */
+    --brand-800: 206.5 100% 27.1%; /* #004D8A */
+    --brand-900: 206.7 100% 21.2%; /* #003C6C */
+    --brand-950: 208 83.3% 14.1%; /* #062642 */
   }
 
-  .dark {
-    --background: 215 28% 9%;
-    --foreground: 210 17% 90%;
-    --card: 215 25% 12%;
-    --card-foreground: 210 17% 90%;
-    --primary: 204 100% 45%;
-    --primary-foreground: 0 0% 100%;
-    --primary-hover: 204 100% 52%;
-    --secondary: 215 20% 17%;
-    --secondary-foreground: 210 15% 85%;
-    --muted: 215 20% 16%;
-    --muted-foreground: 215 12% 63%;
-    --accent: 204 60% 18%;
-    --accent-foreground: 204 85% 70%;
-    --destructive: 0 72% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 215 16% 22%;
-    --input: 215 16% 20%;
-    --ring: 204 100% 45%;
+  :root,
+  .theme-light {
+    color-scheme: light;
+
+    /* Surfaces */
+    --background: 210 28.6% 97.3%; /* #F6F8FA */
+    --foreground: 211.6 29.2% 12.7%; /* #17202A */
+    --surface: 0 0% 100%; /* #FFFFFF */
+    --surface-muted: 210 40% 98%; /* #F8FAFC */
+    --surface-raised: 0 0% 100%; /* #FFFFFF */
+    --card: 0 0% 100%; /* #FFFFFF */
+    --card-foreground: 211.6 29.2% 12.7%; /* #17202A */
+    --popover: 0 0% 100%; /* #FFFFFF */
+    --popover-foreground: 211.6 29.2% 12.7%; /* #17202A */
+
+    /* Brand / primary */
+    --primary: 204.4 100% 36.7%; /* #006FBB */
+    --primary-hover: 206 100% 32.5%; /* #005EA6 */
+    --primary-active: 206.5 100% 27.1%; /* #004D8A */
+    --primary-foreground: 0 0% 100%; /* #FFFFFF */
+    --primary-muted: 208.2 68% 95.1%; /* #EAF3FB */
+    --primary-muted-foreground: 206.5 100% 27.1%; /* #004D8A */
+
+    /* Neutral roles (shadcn meaning: muted = muted bg, muted-foreground = secondary text) */
+    --secondary: 210 30.8% 94.9%; /* #EEF2F6 */
+    --secondary-foreground: 211.6 29.2% 12.7%; /* #17202A */
+    --muted: 210 27.3% 95.7%; /* #F1F4F7 */
+    --muted-foreground: 216 13% 45.1%; /* #647082 */
+    --subtle-foreground: 215.6 13% 59.4%; /* #8A95A5 */
+    --accent: 210 30.8% 94.9%; /* #EEF2F6 */
+    --accent-foreground: 211.6 29.2% 12.7%; /* #17202A */
+
+    /* Status tones: X = strong (dots, icons, text on X-muted); X-foreground = text on solid X; X-muted = tint */
+    --success: 141.8 69.2% 28%; /* #16793A */
+    --success-foreground: 0 0% 100%; /* #FFFFFF */
+    --success-muted: 140 40% 94.1%; /* #EAF6EE */
+    --warning: 33.1 100% 32%; /* #A35A00 */
+    --warning-foreground: 0 0% 100%; /* #FFFFFF */
+    --warning-muted: 39.2 86.7% 94.1%; /* #FDF4E3 */
+    --danger: 357.3 66.2% 46.5%; /* #C5282F */
+    --danger-foreground: 0 0% 100%; /* #FFFFFF */
+    --danger-muted: 0 78.9% 96.3%; /* #FDEEEE */
+    --info: 205.5 94.4% 34.7%; /* #0565AC */
+    --info-foreground: 0 0% 100%; /* #FFFFFF */
+    --info-muted: 208.2 68% 95.1%; /* #EAF3FB */
+    --neutral: 213.6 12.7% 38.6%; /* #56616F */
+    --neutral-foreground: 0 0% 100%; /* #FFFFFF */
+    --neutral-muted: 210 23.1% 94.9%; /* #EFF2F5 */
+    --destructive: 357.3 66.2% 46.5%; /* #C5282F */
+    --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+
+    /* Lines and focus */
+    --border: 215 27.3% 91.4%; /* #E3E8EF */
+    --input: 216.4 13.2% 58.4%; /* #8792A3 */
+    --ring: 204.4 100% 36.7%; /* #006FBB */
+
+    /* Charts */
+    --chart-1: 204.4 100% 36.7%; /* #006FBB */
+    --chart-2: 190.2 85.9% 38.8%; /* #0E9BB8 */
+    --chart-3: 253.2 60.8% 59%; /* #7357D6 */
+    --chart-4: 37.9 94.5% 42.7%; /* #D48806 */
+    --chart-5: 148.9 62% 36.1%; /* #23955A */
+    --chart-grid: 210 27.8% 92.9%; /* #E8EDF2 */
+    --chart-axis: 216 13% 45.1%; /* #647082 */
+    --chart-tooltip: 0 0% 100%; /* #FFFFFF */
+    --chart-tooltip-foreground: 211.6 29.2% 12.7%; /* #17202A */
+
+    /* Sidebar */
+    --sidebar: 0 0% 100%; /* #FFFFFF */
+    --sidebar-foreground: 214.6 18.3% 27.8%; /* #3A4554 */
+    --sidebar-muted: 216.4 11.6% 47.5%; /* #6B7687 */
+    --sidebar-active: 208.2 68% 95.1%; /* #EAF3FB */
+    --sidebar-active-foreground: 206 100% 32.5%; /* #005EA6 */
+    --sidebar-border: 215 27.3% 91.4%; /* #E3E8EF */
+    --sidebar-hover: 214.3 33.3% 95.9%; /* #F1F4F8 */
+
+    /* Modal scrim (used as bg-overlay/50) */
+    --overlay: 213 40% 8%;
+
+    /* Elevation (restrained; borders carry most of the hierarchy) */
+    --shadow-color: 215 28% 17%;
+    --shadow-xs: 0 1px 1px 0 hsl(var(--shadow-color) / 0.04);
+    --shadow-sm: 0 1px 2px 0 hsl(var(--shadow-color) / 0.06), 0 1px 1px -1px hsl(var(--shadow-color) / 0.04);
+    --shadow-md: 0 4px 12px -2px hsl(var(--shadow-color) / 0.1), 0 2px 4px -2px hsl(var(--shadow-color) / 0.06);
+    --shadow-lg: 0 16px 40px -8px hsl(var(--shadow-color) / 0.18), 0 4px 10px -4px hsl(var(--shadow-color) / 0.08);
+  }
+
+  .dark,
+  .theme-dark {
+    color-scheme: dark;
+
+    /* Surfaces */
+    --background: 213.3 50% 7.1%; /* #09111B */
+    --foreground: 205.7 41.2% 96.7%; /* #F3F7FA */
+    --surface: 213.9 46.9% 9.6%; /* #0D1724 */
+    --surface-muted: 213.6 45.5% 10.8%; /* #0F1A28 */
+    --surface-raised: 213.1 46% 12.4%; /* #111E2E */
+    --card: 213.9 46.9% 9.6%; /* #0D1724 */
+    --card-foreground: 205.7 41.2% 96.7%; /* #F3F7FA */
+    --popover: 213.1 46% 12.4%; /* #111E2E */
+    --popover-foreground: 205.7 41.2% 96.7%; /* #F3F7FA */
+
+    /* Brand / primary */
+    --primary: 207.6 81.3% 58%; /* #3D9BEB */
+    --primary-hover: 207.6 83.3% 64.7%; /* #5AABF0 */
+    --primary-active: 207.3 84.8% 71.6%; /* #79BCF4 */
+    --primary-foreground: 208.9 77.1% 6.9%; /* #04121F */
+    --primary-muted: 209.5 66.3% 16.3%; /* #0E2A45 */
+    --primary-muted-foreground: 206.9 84% 75.5%; /* #8CC6F5 */
+
+    /* Neutral roles (shadcn meaning: muted = muted bg, muted-foreground = secondary text) */
+    --secondary: 211.2 36.2% 13.5%; /* #16222F */
+    --secondary-foreground: 212.3 30.2% 91.6%; /* #E3E9F0 */
+    --muted: 214.3 41.2% 13.3%; /* #142030 */
+    --muted-foreground: 212.1 18.9% 71%; /* #A7B4C3 */
+    --subtle-foreground: 215 16.4% 56.9%; /* #7F8EA3 */
+    --accent: 212 39.5% 14.9%; /* #172535 */
+    --accent-foreground: 205.7 41.2% 96.7%; /* #F3F7FA */
+
+    /* Status tones: X = strong (dots, icons, text on X-muted); X-foreground = text on solid X; X-muted = tint */
+    --success: 146.4 50.6% 51.6%; /* #45C27C */
+    --success-foreground: 144.7 68% 4.9%; /* #04150B */
+    --success-muted: 155.6 47.4% 11.2%; /* #0F2A1F */
+    --warning: 37.8 79.7% 57.5%; /* #E9A93C */
+    --warning-foreground: 35 85.7% 5.5%; /* #1A1002 */
+    --warning-muted: 36.9 41.9% 12.2%; /* #2C2212 */
+    --danger: 2.7 83.7% 68.6%; /* #F2726C */
+    --danger-foreground: 0 69.7% 6.5%; /* #1C0505 */
+    --danger-muted: 348.5 33.3% 15.3%; /* #341A1F */
+    --info: 207.7 83.7% 63.9%; /* #56A9F0 */
+    --info-foreground: 208.9 77.1% 6.9%; /* #04121F */
+    --info-muted: 209.5 66.3% 16.3%; /* #0E2A45 */
+    --neutral: 213.1 18.7% 69.6%; /* #A3B0C0 */
+    --neutral-foreground: 213.8 42.1% 7.5%; /* #0B121B */
+    --neutral-muted: 214.3 35% 15.7%; /* #1A2636 */
+    --destructive: 2.7 83.7% 68.6%; /* #F2726C */
+    --destructive-foreground: 0 69.7% 6.5%; /* #1C0505 */
+
+    /* Lines and focus */
+    --border: 214.3 34.7% 19.8%; /* #213044 */
+    --input: 214.5 18.2% 43.1%; /* #5A6B82 */
+    --ring: 207.6 81.3% 58%; /* #3D9BEB */
+
+    /* Charts */
+    --chart-1: 207.6 81.3% 58%; /* #3D9BEB */
+    --chart-2: 189.4 70.6% 52%; /* #2EC0DB */
+    --chart-3: 252.8 80.6% 73.7%; /* #9D86F2 */
+    --chart-4: 37.3 81.1% 58.4%; /* #EBAA3F */
+    --chart-5: 146.4 50.6% 51.6%; /* #45C27C */
+    --chart-grid: 213.8 37.2% 16.9%; /* #1B293B */
+    --chart-axis: 215 16.4% 56.9%; /* #7F8EA3 */
+    --chart-tooltip: 213.1 46% 12.4%; /* #111E2E */
+    --chart-tooltip-foreground: 205.7 41.2% 96.7%; /* #F3F7FA */
+
+    /* Sidebar */
+    --sidebar: 214.3 48.8% 8.4%; /* #0B1420 */
+    --sidebar-foreground: 211.3 23.2% 80.6%; /* #C2CDD9 */
+    --sidebar-muted: 215 16.4% 56.9%; /* #7F8EA3 */
+    --sidebar-active: 210 64.3% 16.5%; /* #0F2A45 */
+    --sidebar-active-foreground: 206.9 84% 75.5%; /* #8CC6F5 */
+    --sidebar-border: 214 36.6% 16.1%; /* #1A2738 */
+    --sidebar-hover: 213.1 44.6% 12.7%; /* #121F2F */
+
+    /* Modal scrim (used as bg-overlay/50) */
+    --overlay: 216 60% 2%;
+
+    /* Elevation: darker, denser shadows so raised surfaces still separate */
+    --shadow-color: 216 60% 2%;
+    --shadow-xs: 0 1px 1px 0 hsl(var(--shadow-color) / 0.3);
+    --shadow-sm: 0 1px 2px 0 hsl(var(--shadow-color) / 0.4), 0 1px 1px -1px hsl(var(--shadow-color) / 0.3);
+    --shadow-md: 0 6px 16px -4px hsl(var(--shadow-color) / 0.55), 0 2px 4px -2px hsl(var(--shadow-color) / 0.4);
+    --shadow-lg: 0 20px 48px -8px hsl(var(--shadow-color) / 0.65), 0 4px 12px -4px hsl(var(--shadow-color) / 0.45);
+  }
+
+  /* A forced-theme subtree must re-resolve inherited text color against its own tokens. */
+  .theme-light,
+  .theme-dark {
+    color: hsl(var(--foreground));
   }
 
   * {
@@ -51,327 +212,68 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    letter-spacing: -0.011em;
+    @apply bg-background text-sm text-foreground antialiased;
+    /* No negative letter-spacing: it breaks Arabic joining. Font stack: tailwind fontFamily.sans. */
+    text-rendering: optimizeLegibility;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight;
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold;
     color: hsl(var(--foreground));
   }
+
+  /* Fallback focus indicator for raw elements; primitives draw their own ring and opt out. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Same specificity as preflight's rule, declared later, so it wins. */
+  input::placeholder,
+  textarea::placeholder {
+    color: hsl(var(--subtle-foreground));
+    opacity: 1;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.22);
+  }
 }
 
-:root {
-  --goai-blue: #0077C8;
-  --goai-dark: #00263E;
-  --goai-light-blue: #E6F2F8;
-}
-
-.bg-gradient-primary {
-  background: linear-gradient(135deg, #0077C8 0%, #005A9C 100%);
-}
-
-.card-goai {
-  @apply bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200;
-}
-
-*:focus-visible {
-  outline: 2px solid var(--goai-blue);
-  outline-offset: 2px;
-}
-
+/* --- scrollbars (tokenized) --- */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background-color: hsl(var(--subtle-foreground) / 0.4);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background-color: hsl(var(--subtle-foreground) / 0.7);
 }
 
-/*
- * Dark mode remaps.
- * Pages use hardcoded white/slate utility classes; rather than adding dark:
- * variants across every file, remap them centrally when .dark is active.
- * Selectors (.dark .cls) outrank the single-class utilities they override.
- */
-
-/* --- surfaces --- */
-.dark .bg-white {
-  background-color: hsl(var(--card));
-}
-.dark .bg-white\/60 {
-  background-color: hsl(var(--card) / 0.6);
-}
-.dark .bg-slate-50 {
-  background-color: hsl(215 22% 14%);
-}
-.dark .bg-slate-50\/50 {
-  background-color: hsl(215 22% 14% / 0.5);
-}
-.dark .bg-slate-50\/80 {
-  background-color: hsl(215 22% 14% / 0.8);
-}
-.dark .bg-slate-100 {
-  background-color: hsl(215 19% 18%);
-}
-.dark .bg-slate-200 {
-  background-color: hsl(215 17% 23%);
-}
-.dark .bg-slate-200\/70 {
-  background-color: hsl(215 17% 23% / 0.7);
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-/* --- slate text --- */
-.dark .text-slate-900 {
-  color: hsl(210 20% 95%);
-}
-.dark .text-slate-800 {
-  color: hsl(210 17% 88%);
-}
-.dark .text-slate-700 {
-  color: hsl(213 15% 80%);
-}
-.dark .text-slate-600 {
-  color: hsl(214 13% 70%);
-}
-.dark .text-slate-500 {
-  color: hsl(215 12% 62%);
-}
-.dark .text-slate-400,
-.dark .placeholder\:text-slate-400::placeholder {
-  color: hsl(215 11% 52%);
-}
-
-/* --- borders / rings / shadows --- */
-.dark .border-slate-100 {
-  border-color: hsl(215 17% 18%);
-}
-.dark .border-slate-200 {
-  border-color: hsl(var(--border));
-}
-.dark .border-slate-300 {
-  border-color: hsl(215 15% 28%);
-}
-.dark .border-slate-400,
-.dark .border-\[\#94a3b8\] {
-  border-color: hsl(215 14% 34%);
-}
-.dark .border-\[\#cbd5e1\] {
-  border-color: hsl(215 15% 28%);
-}
-.dark .shadow-slate-200\/60 {
-  --tw-shadow-color: rgb(0 0 0 / 0.45);
-}
-
-/* --- state variants (after base remaps so they win on interaction) --- */
-.dark .focus\:bg-white:focus,
-.dark .hover\:bg-white:hover,
-.dark .odd\:bg-white:nth-child(odd),
-.dark .focus-within\:bg-white:focus-within {
-  background-color: hsl(var(--card));
-}
-.dark .hover\:bg-slate-50:hover,
-.dark .group:hover .group-hover\:bg-slate-50 {
-  background-color: hsl(215 22% 14%);
-}
-.dark .even\:bg-slate-50\/60:nth-child(even) {
-  background-color: hsl(215 22% 14% / 0.6);
-}
-.dark .hover\:bg-slate-100:hover,
-.dark .group:hover .group-hover\:bg-slate-100 {
-  background-color: hsl(215 19% 18%);
-}
-.dark .hover\:text-slate-900:hover {
-  color: hsl(210 20% 95%);
-}
-.dark .hover\:text-slate-800:hover {
-  color: hsl(210 17% 88%);
-}
-.dark .hover\:text-slate-700:hover,
-.dark .group:hover .group-hover\:text-slate-700 {
-  color: hsl(213 15% 80%);
-}
-.dark .hover\:text-slate-600:hover {
-  color: hsl(214 13% 70%);
-}
-.dark .hover\:border-slate-300:hover,
-.dark .focus-within\:border-slate-300:focus-within {
-  border-color: hsl(215 15% 28%);
-}
-.dark .focus-within\:ring-slate-200:focus-within {
-  --tw-ring-color: hsl(215 15% 30%);
-}
-
-/* --- brand hex classes --- */
-.dark .text-\[\#004080\],
-.dark .text-\[\#0057A8\] {
-  color: hsl(var(--primary));
-}
-.dark .text-\[\#00263E\] {
-  color: hsl(var(--foreground));
-}
-.dark .border-\[\#004080\],
-.dark .border-\[\#0057A8\] {
-  border-color: hsl(var(--primary));
-}
-
-/* --- accent tints (badges, alerts, status chips) --- */
-.dark .bg-red-50 {
-  background-color: rgb(239 68 68 / 0.1);
-}
-.dark .bg-red-50\/60 {
-  background-color: rgb(239 68 68 / 0.06);
-}
-.dark .bg-red-100 {
-  background-color: rgb(239 68 68 / 0.17);
-}
-.dark .bg-amber-50 {
-  background-color: rgb(245 158 11 / 0.1);
-}
-.dark .bg-amber-100 {
-  background-color: rgb(245 158 11 / 0.17);
-}
-.dark .bg-green-50 {
-  background-color: rgb(34 197 94 / 0.1);
-}
-.dark .bg-emerald-50 {
-  background-color: rgb(16 185 129 / 0.1);
-}
-.dark .bg-emerald-100 {
-  background-color: rgb(16 185 129 / 0.17);
-}
-.dark .bg-sky-100 {
-  background-color: rgb(14 165 233 / 0.17);
-}
-.dark .bg-violet-100 {
-  background-color: rgb(139 92 246 / 0.17);
-}
-.dark .bg-rose-100 {
-  background-color: rgb(244 63 94 / 0.17);
-}
-.dark .bg-rose-200 {
-  background-color: rgb(244 63 94 / 0.25);
-}
-.dark .bg-blue-100 {
-  background-color: rgb(59 130 246 / 0.17);
-}
-.dark .border-red-200 {
-  border-color: rgb(239 68 68 / 0.35);
-}
-.dark .border-red-300 {
-  border-color: rgb(239 68 68 / 0.45);
-}
-.dark .border-amber-200 {
-  border-color: rgb(245 158 11 / 0.35);
-}
-.dark .border-amber-300 {
-  border-color: rgb(245 158 11 / 0.45);
-}
-.dark .border-green-200 {
-  border-color: rgb(34 197 94 / 0.35);
-}
-.dark .border-emerald-200 {
-  border-color: rgb(16 185 129 / 0.35);
-}
-
-/* --- accent text: dark shades flip to light shades --- */
-.dark .text-red-900,
-.dark .text-red-800,
-.dark .text-red-700 {
-  color: #fca5a5;
-}
-.dark .text-red-600,
-.dark .hover\:text-red-600:hover {
-  color: #f87171;
-}
-.dark .text-amber-900,
-.dark .text-amber-800,
-.dark .text-amber-700 {
-  color: #fcd34d;
-}
-.dark .text-amber-600 {
-  color: #fbbf24;
-}
-.dark .text-green-800 {
-  color: #86efac;
-}
-.dark .text-emerald-800,
-.dark .text-emerald-700 {
-  color: #6ee7b7;
-}
-.dark .text-emerald-600 {
-  color: #34d399;
-}
-.dark .text-sky-700 {
-  color: #7dd3fc;
-}
-.dark .text-sky-600 {
-  color: #38bdf8;
-}
-.dark .text-violet-700 {
-  color: #c4b5fd;
-}
-.dark .text-violet-600 {
-  color: #a78bfa;
-}
-.dark .text-rose-800,
-.dark .text-rose-700 {
-  color: #fda4af;
-}
-.dark .text-rose-600,
-.dark .hover\:text-rose-600:hover {
-  color: #fb7185;
-}
-.dark .text-blue-600 {
-  color: #60a5fa;
-}
-
-/* --- component-level rules defined in this file --- */
-.dark .card-goai {
-  background-color: hsl(var(--card));
-  border-color: hsl(var(--border));
-}
-
-/* --- scrollbars --- */
-.dark ::-webkit-scrollbar-track {
-  background: #1e293b;
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: #475569;
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
-}
-
-/* --- recharts (colors are set as SVG/inline attributes) --- */
-.dark .recharts-cartesian-grid line {
-  stroke: #334155;
-}
-.dark .recharts-cartesian-axis line {
-  stroke: #475569;
-}
-.dark .recharts-text {
-  fill: #94a3b8;
-}
-.dark .recharts-tooltip-cursor {
-  stroke: #475569;
-  fill: rgb(148 163 184 / 0.1);
-}
-.dark .recharts-default-tooltip {
-  background-color: #1e293b !important;
-  border-color: #334155 !important;
-  color: #e2e8f0;
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-color: hsl(var(--subtle-foreground) / 0.5) transparent;
+  }
 }
 
 /* --- browser autofill ---
@@ -387,20 +289,13 @@
 .dark select:-webkit-autofill {
   -webkit-text-fill-color: hsl(var(--foreground));
   caret-color: hsl(var(--foreground));
-  -webkit-box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
+  -webkit-box-shadow: 0 0 0 1000px hsl(var(--surface)) inset;
   transition: background-color 600000s 0s, color 600000s 0s;
 }
 
-/* auth forms (login, signup, reset, verify) sit on the remapped slate-50 surface */
-.dark input.bg-slate-50:-webkit-autofill,
-.dark .bg-slate-50 input:-webkit-autofill {
-  -webkit-box-shadow: 0 0 0 1000px hsl(215 22% 14%) inset;
-}
 
-/* those fields switch to the card surface on focus; keep the focus ring visible */
-.dark .focus-within\:bg-white:focus-within input:-webkit-autofill {
-  -webkit-box-shadow: 0 0 0 1000px hsl(var(--card)) inset;
-}
-.dark input.focus\:bg-white:-webkit-autofill:focus {
-  -webkit-box-shadow: 0 0 0 2px hsl(var(--ring)), 0 0 0 1000px hsl(var(--card)) inset;
+/* The repaint shadow above replaces Tailwind's ring shadow; put the Input focus ring back as a
+ * second layer (matches ui/input: ring-2 ring-ring/30 plus the primary border). */
+.dark input:-webkit-autofill:focus-visible {
+  -webkit-box-shadow: 0 0 0 2px hsl(var(--ring) / 0.3), 0 0 0 1000px hsl(var(--surface)) inset;
 }

@@ -1,18 +1,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import {
-  ExternalLink,
-  FolderSync,
-  Loader2,
-  Pencil,
-  PlugZap,
-  Plus,
-  Power,
-  PowerOff,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { ExternalLink, FolderSync, Pencil, PlugZap, Plus, Power, PowerOff, RefreshCw, Trash2 } from "lucide-react";
 import { formatUserError } from "@/lib/errors";
-import { docIntelUnavailable, formatWhen, notInstalled, type DocIntelUnavailable } from "@/lib/doc-intel";
+import { formatNumber } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { docIntelUnavailable, notInstalled, type DocIntelUnavailable } from "@/lib/doc-intel";
 import {
   FILE_STATES,
   FILE_STATE_LABELS,
@@ -34,6 +25,7 @@ import {
 } from "@/lib/sharepoint-sync";
 import { useDocIntelStatus } from "@/hooks/useDocumentImport";
 import {
+  SYNC_REFETCH_MS,
   useCrmEntities,
   useDeleteSource,
   useRefreshWhenSyncsFinish,
@@ -45,20 +37,30 @@ import {
   useTestSourceConnection,
   useUpdateSource,
 } from "@/hooks/useSharePointSync";
-import { PageHeader } from "@/components/shared/PageHeader";
+import { Page, PageHeading } from "@/components/shell/page";
+import { EmptyState } from "@/components/data/empty-state";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Stat, StatGroup } from "@/components/data/stat";
+import { Status } from "@/components/data/status";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import { RowActionsMenu } from "@/components/ui/dropdown-menu";
+import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import { ConnectionTestResult } from "@/components/doc-intel/ConnectionTestResult";
 import { CrmEntitiesTable, EMPTY_ENTITY_FILTERS, type CrmEntityFilters } from "@/components/doc-intel/CrmEntitiesTable";
-import { ListPager } from "@/components/doc-intel/ListPager";
 import { Notice } from "@/components/doc-intel/Notice";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
 import { SourceDialog } from "@/components/doc-intel/SourceDialog";
 import { SourceFilesTable } from "@/components/doc-intel/SourceFilesTable";
 import { LastSyncSummary, SecretBadge, SourceStatusBadge } from "@/components/doc-intel/SyncBadges";
 import { SyncRunsTable } from "@/components/doc-intel/SyncRunsTable";
+import { AutoRefreshIndicator } from "@/components/system/AutoRefreshIndicator";
 import type { DocIntelStatusOut, FileState, FileStatus, SourceOut } from "@/types/api";
 
 const RUNS_PAGE_SIZE = 20;
@@ -67,12 +69,6 @@ const ENTITIES_PAGE_SIZE = 25;
 const DETAILS_ID = "sharepoint-sync-details";
 
 type TabId = "runs" | "files" | "entities";
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: "runs", label: "Sync history" },
-  { id: "files", label: "Files" },
-  { id: "entities", label: "CRM entities" },
-];
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -107,39 +103,31 @@ function ProblemNotice({ problem, onDismiss }: { problem: ActionProblem; onDismi
   );
 }
 
-function Placeholder({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">{children}</div>
-  );
-}
-
 // ---- Source card -----------------------------------------------------------------------------
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <>
-      {/* Stacked on phones: space between facts, not between a label and its value. */}
-      <dt className="mt-2 text-xs font-medium text-muted-foreground first:mt-0 sm:mt-0 sm:pt-0.5">{label}</dt>
-      <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
-    </>
+    <div className="grid gap-x-3 gap-y-0.5 py-1.5 first:pt-0 last:pb-0 sm:grid-cols-[7rem_minmax(0,1fr)]">
+      <dt className="text-xs font-medium leading-5 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-ui text-foreground [overflow-wrap:anywhere]">{children}</dd>
+    </div>
   );
 }
 
-const COUNT_TILES: { key: SourceCountKey; label: string; tone?: "red" }[] = [
+const COUNT_TILES: { key: SourceCountKey; label: string; danger?: boolean }[] = [
   { key: "files_active", label: "Files" },
-  { key: "files_failed", label: "Failed files", tone: "red" },
+  { key: "files_failed", label: "Failed files", danger: true },
   { key: "files_deleted", label: "Deleted files" },
   { key: "entities_active", label: "CRM entities" },
 ];
 
-function ActiveRunBanner({ source }: { source: SourceOut }) {
+function ActiveRunRow({ source }: { source: SourceOut }) {
   const run = source.active_run;
   if (!run || !isActiveRun(run)) return null;
   const queued = run.status === "QUEUED";
   const facts = queued
-    ? [`queued ${formatWhen(run.created_at)}`]
+    ? []
     : [
-        run.started_at ? `started ${formatWhen(run.started_at)}` : null,
         `${plural(run.files_seen, "file")} seen`,
         `${run.files_new.toLocaleString()} new`,
         `${run.files_changed.toLocaleString()} changed`,
@@ -147,12 +135,27 @@ function ActiveRunBanner({ source }: { source: SourceOut }) {
         run.files_failed > 0 ? `${run.files_failed.toLocaleString()} failed` : null,
       ].filter(Boolean);
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-      <Loader2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
-      <div className="min-w-0">
-        <p className="font-medium text-primary">{queued ? "Sync queued, waiting for the sync worker" : "Sync running"}</p>
-        <p className="break-words text-xs text-muted-foreground">{facts.join(" · ")}</p>
+    <div className="space-y-1.5 rounded-md border border-border bg-surface-muted px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <Status
+          tone={queued ? "neutral" : "warning"}
+          pulse={!queued}
+          label={queued ? "Sync queued, waiting for the sync worker" : "Sync running"}
+        />
+        <span className="text-xs text-muted-foreground">
+          {queued ? (
+            <>
+              queued <RelativeTime value={run.created_at} />
+            </>
+          ) : run.started_at ? (
+            <>
+              started <RelativeTime value={run.started_at} />
+            </>
+          ) : null}
+        </span>
       </div>
+      <Progress label={queued ? "Sync queued" : "Sync progress"} size="sm" tone={queued ? "info" : "warning"} />
+      {facts.length > 0 && <p className="text-xs tabular-nums text-muted-foreground">{facts.join(" · ")}</p>}
     </div>
   );
 }
@@ -178,92 +181,123 @@ function SourceCard({ source, selected, showSelect, onSelect, onEdit, onDelete }
 
   const syncProblem = syncNow.isError ? describeActionError(syncNow.error, "Sync now", { syncConflict: true }) : null;
   const testProblem = test.isError ? describeActionError(test.error, "The connection test") : null;
-  const toggleProblem = toggle.isError
-    ? describeActionError(toggle.error, disabled ? "Enabling the source" : "Disabling the source")
-    : null;
+  const toggleProblem = toggle.isError ? describeActionError(toggle.error, disabled ? "Enabling the source" : "Disabling the source") : null;
+  const highlighted = selected && showSelect;
 
   return (
-    <article
+    <Card
       aria-labelledby={titleId}
-      aria-current={selected && showSelect ? "true" : undefined}
-      className={`min-w-0 rounded-xl border bg-card p-5 shadow-sm ${selected && showSelect ? "border-primary/60 ring-1 ring-primary/30" : "border-border"}`}
+      aria-current={highlighted ? "true" : undefined}
+      className={cn("min-w-0 p-4", highlighted && "border-primary/60 shadow-[inset_3px_0_0_hsl(var(--primary))]")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-            <FolderSync aria-hidden="true" className="h-5 w-5" />
-          </div>
+          <span aria-hidden="true" className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-muted text-muted-foreground">
+            <FolderSync className="h-4 w-4" />
+          </span>
           <div className="min-w-0">
-            <h3 id={titleId} className="break-words text-base font-semibold text-foreground">
-              {source.name}
-            </h3>
-            <p className="break-words text-sm text-muted-foreground">
-              {source.account_name ?? (source.account_id != null ? `Account #${source.account_id}` : "No account")}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h3 id={titleId} className="break-words text-sm font-semibold text-foreground">
+                <bdi>{source.name}</bdi>
+              </h3>
+              <SourceStatusBadge status={source.status} />
+            </div>
+            <p className="mt-0.5 break-words text-ui text-muted-foreground">
+              <bdi>{source.account_name ?? (source.account_id != null ? `Account #${source.account_id}` : "No account")}</bdi>
             </p>
           </div>
         </div>
-        <SourceStatusBadge status={source.status} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            onClick={() =>
+              syncNow.mutate(source.id, {
+                onSuccess: () => toast.success("Sync queued", { description: source.name }),
+              })
+            }
+            disabled={syncing || disabled}
+            title={disabled ? "Enable the source to sync it" : undefined}
+            loading={syncNow.isPending}
+          >
+            {!syncNow.isPending && <RefreshCw aria-hidden="true" className={cn("h-4 w-4", active && "motion-safe:animate-spin")} />}
+            {syncing ? "Syncing…" : "Sync now"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => test.mutate(source.id)} loading={test.isPending}>
+            {!test.isPending && <PlugZap aria-hidden="true" className="h-4 w-4" />}
+            {test.isPending ? "Testing…" : "Test connection"}
+          </Button>
+          <RowActionsMenu
+            label={`More actions for ${source.name}`}
+            items={[
+              { label: "Edit", icon: Pencil, onSelect: onEdit },
+              {
+                label: disabled ? "Enable" : "Disable",
+                icon: disabled ? Power : PowerOff,
+                disabled: toggle.isPending,
+                onSelect: () =>
+                  toggle.mutate(
+                    { id: source.id, body: { status: disabled ? "ACTIVE" : "DISABLED" } },
+                    { onSuccess: () => toast.success(disabled ? "Source enabled" : "Source disabled", { description: source.name }) },
+                  ),
+              },
+              { label: "Delete", icon: Trash2, destructive: true, separatorBefore: true, onSelect: onDelete },
+            ]}
+          />
+        </div>
       </div>
 
       {!source.credentials_readable && (
-        <Notice tone="danger" title="The stored credentials can't be decrypted" className="mt-4">
-          The server's encryption key is missing or was rotated. Edit the source and enter the Tenant ID, Client ID and
-          client secret again.
+        <Notice tone="danger" title="The stored credentials can't be decrypted" className="mt-3">
+          The server's encryption key is missing or was rotated. Edit the source and enter the Tenant ID, Client ID and client secret
+          again.
         </Notice>
       )}
 
-      <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:gap-y-2">
+      <div className="mt-4 grid gap-x-8 gap-y-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <dl className="divide-y divide-border">
           <Fact label="Site">
             {siteHref ? (
-              // Inline (not flex) so a long URL wraps and the icon follows its last line.
-              <a
-                href={siteHref}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-primary underline-offset-2 [overflow-wrap:anywhere] hover:underline"
-              >
+              <a href={siteHref} target="_blank" rel="noreferrer noopener" className="font-mono text-xs text-primary underline-offset-2 hover:underline">
                 {source.site_url}
                 <ExternalLink aria-hidden="true" className="ml-1 inline h-3 w-3 align-[-1px]" />
                 <span className="sr-only"> (opens in a new tab)</span>
               </a>
             ) : (
-              <span className="[overflow-wrap:anywhere]">{source.site_url || "—"}</span>
+              <span className="font-mono text-xs">{source.site_url || "—"}</span>
             )}
           </Fact>
-          <Fact label="Library">{libraryLabel(source.drive_name)}</Fact>
           <Fact label="Folder">
-            <span className="[overflow-wrap:anywhere]">{folderLabel(source.folder_path)}</span>
+            <span className="font-mono text-xs">
+              {libraryLabel(source.drive_name)} · {folderLabel(source.folder_path)}
+            </span>
             <span className="text-muted-foreground">{source.recursive ? " · with subfolders" : " · this folder only"}</span>
           </Fact>
           <Fact label="File types">{fileTypesLabel(source.file_extensions)}</Fact>
           <Fact label="Tenant ID">
-            <span className="font-mono text-xs [overflow-wrap:anywhere]">{source.tenant_id || "—"}</span>
+            <span className="font-mono text-xs">{source.tenant_id || "—"}</span>
           </Fact>
           <Fact label="Client ID">
-            <span className="font-mono text-xs [overflow-wrap:anywhere]">{source.client_id || "—"}</span>
+            <span className="font-mono text-xs">{source.client_id || "—"}</span>
           </Fact>
           <Fact label="Client secret">
             <SecretBadge source={source} />
           </Fact>
-          <Fact label="CRM intelligence">
+          <Fact label="Intelligence">
             {source.use_intelligence ? "LLM intelligence on" : "Local pattern rules (no document text leaves the server)"}
           </Fact>
         </dl>
 
-        <div className="min-w-0 space-y-4">
+        <div className="min-w-0 space-y-3">
           <div>
             <p className="text-xs font-medium text-muted-foreground">Schedule</p>
-            <p className="mt-0.5 break-words text-sm text-foreground">
+            <p className="mt-0.5 break-words text-ui text-foreground">
               {scheduleSummary(source)}
               {source.sync_enabled && <span className="text-muted-foreground"> ({SCHEDULE_TIME_ZONE_LABEL})</span>}
             </p>
-            {source.sync_enabled && disabled && (
-              <p className="text-xs text-muted-foreground">Paused while the source is disabled.</p>
-            )}
+            {source.sync_enabled && disabled && <p className="text-xs text-muted-foreground">Paused while the source is disabled.</p>}
           </div>
           <div aria-live="polite">
-            <ActiveRunBanner source={source} />
+            <ActiveRunRow source={source} />
           </div>
           <div>
             <p className="text-xs font-medium text-muted-foreground">Last sync</p>
@@ -271,81 +305,39 @@ function SourceCard({ source, selected, showSelect, onSelect, onEdit, onDelete }
               <LastSyncSummary source={source} />
             </div>
           </div>
-          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {COUNT_TILES.map(({ key, label, tone }) => {
+          <StatGroup columns={4} variant="strip" aria-label={`${source.name} counts`}>
+            {COUNT_TILES.map(({ key, label, danger }) => {
               const value = sourceCount(source, key);
               return (
-                <div key={key} className="rounded-lg border border-border bg-muted/40 px-3 py-2">
-                  <dt className="text-[11px] leading-tight text-muted-foreground">{label}</dt>
-                  <dd
-                    className={`text-lg font-bold tabular-nums ${tone === "red" && value ? "text-red-700" : "text-foreground"}`}
-                  >
-                    {value == null ? "—" : value.toLocaleString()}
-                  </dd>
-                </div>
+                <Stat
+                  key={key}
+                  emphasis="secondary"
+                  label={label}
+                  value={<span className={danger && value ? "text-danger" : undefined}>{value == null ? "—" : formatNumber(value)}</span>}
+                />
               );
             })}
-          </dl>
+          </StatGroup>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-        <Button
-          onClick={() => syncNow.mutate(source.id)}
-          disabled={syncing || disabled}
-          title={disabled ? "Enable the source to sync it" : undefined}
-        >
-          {syncing ? (
-            <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" />
-          )}
-          {syncing ? "Syncing…" : "Sync now"}
-        </Button>
-        <Button variant="outline" onClick={() => test.mutate(source.id)} disabled={test.isPending}>
-          {test.isPending ? (
-            <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <PlugZap aria-hidden="true" className="mr-2 h-4 w-4" />
-          )}
-          {test.isPending ? "Testing…" : "Test connection"}
-        </Button>
-        <Button variant="outline" onClick={onEdit}>
-          <Pencil aria-hidden="true" className="mr-2 h-4 w-4" /> Edit
-        </Button>
-        <Button
-          variant="outline"
-          disabled={toggle.isPending}
-          onClick={() => toggle.mutate({ id: source.id, body: { status: disabled ? "ACTIVE" : "DISABLED" } })}
-        >
-          {toggle.isPending ? (
-            <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
-          ) : disabled ? (
-            <Power aria-hidden="true" className="mr-2 h-4 w-4" />
-          ) : (
-            <PowerOff aria-hidden="true" className="mr-2 h-4 w-4" />
-          )}
-          {disabled ? "Enable" : "Disable"}
-        </Button>
-        <Button variant="ghost" onClick={onDelete}>
-          <Trash2 aria-hidden="true" className="mr-2 h-4 w-4 text-red-600" /> Delete
-        </Button>
-        {showSelect && (
-          <Button variant="link" className="px-1 sm:ml-auto" aria-pressed={selected} onClick={onSelect}>
-            {selected ? "Details shown below" : "View history, files & entities"}
+      {showSelect && (
+        <div className="mt-3 flex justify-end border-t border-border pt-3">
+          <Button variant="link" size="sm" className="h-7 px-0" aria-pressed={selected} onClick={onSelect}>
+            {selected ? "Details shown below" : "View history, files and entities"}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {(syncProblem || testProblem || toggleProblem || test.data) && (
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 space-y-3">
           {syncProblem && <ProblemNotice problem={syncProblem} onDismiss={() => syncNow.reset()} />}
           {toggleProblem && <ProblemNotice problem={toggleProblem} onDismiss={() => toggle.reset()} />}
           {testProblem && <ProblemNotice problem={testProblem} onDismiss={() => test.reset()} />}
           {test.data && <ConnectionTestResult result={test.data} onDismiss={() => test.reset()} />}
         </div>
       )}
-    </article>
+    </Card>
   );
 }
 
@@ -357,16 +349,19 @@ function RunsTab({ source }: { source: SourceOut }) {
   return (
     <section aria-label="Sync history" className="space-y-3">
       <ErrorAlert message={runs.isError ? `Couldn't load the sync history: ${formatUserError(runs.error)}` : null} />
-      <div aria-busy={runs.isPlaceholderData} className={`transition-opacity ${runs.isPlaceholderData ? "opacity-60" : ""}`}>
-        <SyncRunsTable runs={runs.data?.items ?? []} loading={runs.isLoading} />
+      <div aria-busy={runs.isPlaceholderData || undefined} className={cn("transition-opacity", runs.isPlaceholderData && "opacity-60")}>
+        <SyncRunsTable
+          runs={runs.data?.items ?? []}
+          loading={runs.isLoading}
+          pagination={{
+            mode: "server",
+            page: Math.floor(offset / RUNS_PAGE_SIZE) + 1,
+            pageSize: RUNS_PAGE_SIZE,
+            total: runs.data?.total ?? 0,
+            onPageChange: (page) => setOffset((page - 1) * RUNS_PAGE_SIZE),
+          }}
+        />
       </div>
-      <ListPager
-        offset={offset}
-        limit={RUNS_PAGE_SIZE}
-        total={runs.data?.total ?? 0}
-        onChange={setOffset}
-        label="Sync history pages"
-      />
     </section>
   );
 }
@@ -388,96 +383,87 @@ function FilesTab({ source }: { source: SourceOut }) {
   );
   const retry = useRetrySourceFile();
   const retryProblem = retry.isError ? describeActionError(retry.error, "Retry") : null;
-  // Retry only re-queues the file (PENDING); the source's next sync processes it.
-  const [retried, setRetried] = useState<string | null>(null);
   const filtered = state !== "ALL" || status !== "ALL";
   const total = files.data?.total ?? 0;
+  const anyProcessing = active || (files.data?.items ?? []).some((f) => f.status === "PROCESSING");
+
+  function clearFilters() {
+    setState("ALL");
+    setStatus("ALL");
+    setOffset(0);
+  }
 
   return (
-    <section aria-label="Files" className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div className="w-full lg:w-44">
-            <Label htmlFor="sp-files-state">State</Label>
-            <Select
-              id="sp-files-state"
-              value={state}
-              onChange={(e) => {
-                setState(e.target.value as "ALL" | FileState);
-                setOffset(0);
-              }}
-              className="mt-1"
-            >
-              <option value="ALL">All states</option>
-              {FILE_STATES.map((s) => (
-                <option key={s} value={s}>
-                  {FILE_STATE_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="w-full lg:w-48">
-            <Label htmlFor="sp-files-status">Status</Label>
-            <Select
-              id="sp-files-status"
-              value={status}
-              onChange={(e) => {
-                setStatus(e.target.value as "ALL" | FileStatus);
-                setOffset(0);
-              }}
-              className="mt-1"
-            >
-              <option value="ALL">All statuses</option>
-              {FILE_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {FILE_STATUS_LABELS[s]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {filtered && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setState("ALL");
-                setStatus("ALL");
-                setOffset(0);
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground" aria-live="polite">
-          {files.data ? plural(total, "file") : files.isLoading ? "Loading files…" : "—"}
-          {active ? " · refreshing every 3 s while a sync runs" : ""}
-        </p>
-      </div>
-
+    <section aria-label="Files" className="space-y-3">
       {retryProblem && <ProblemNotice problem={retryProblem} onDismiss={() => retry.reset()} />}
-      {retried && !retryProblem && (
-        <Notice tone="info" title={`“${retried}” is queued again`} onDismiss={() => setRetried(null)}>
-          The next sync of this source processes it{active ? " (a sync is running now)" : ". Press Sync now to run one right away"}.
-        </Notice>
-      )}
       <ErrorAlert message={files.isError ? `Couldn't load the files: ${formatUserError(files.error)}` : null} />
-      <div aria-busy={files.isPlaceholderData} className={`transition-opacity ${files.isPlaceholderData ? "opacity-60" : ""}`}>
+      <div aria-busy={files.isPlaceholderData || undefined} className={cn("transition-opacity", files.isPlaceholderData && "opacity-60")}>
         <SourceFilesTable
           files={files.data?.items ?? []}
           loading={files.isLoading}
-          emptyMessage={filtered ? "No files match these filters." : "No files found yet. Press Sync now to list the folder."}
+          pagination={{
+            mode: "server",
+            page: Math.floor(offset / FILES_PAGE_SIZE) + 1,
+            pageSize: FILES_PAGE_SIZE,
+            total,
+            onPageChange: (page) => setOffset((page - 1) * FILES_PAGE_SIZE),
+          }}
+          empty={
+            filtered
+              ? {
+                  title: "No files match these filters",
+                  action: (
+                    <Button variant="outline" size="sm" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ),
+                }
+              : { title: "No files found yet", description: "Press Sync now to list the folder." }
+          }
+          toolbarEnd={anyProcessing ? <AutoRefreshIndicator intervalMs={SYNC_REFETCH_MS} fetching={files.isFetching} /> : undefined}
+          toolbar={
+            <FilterBar
+              filters={[
+                {
+                  id: "sp-files-state",
+                  label: "State",
+                  value: state,
+                  onChange: (v) => {
+                    setState(v as "ALL" | FileState);
+                    setOffset(0);
+                  },
+                  options: [{ value: "ALL", label: "All" }, ...FILE_STATES.map((s) => ({ value: s, label: FILE_STATE_LABELS[s] }))],
+                },
+                {
+                  id: "sp-files-status",
+                  label: "Status",
+                  value: status,
+                  onChange: (v) => {
+                    setStatus(v as "ALL" | FileStatus);
+                    setOffset(0);
+                  },
+                  options: [{ value: "ALL", label: "All" }, ...FILE_STATUSES.map((s) => ({ value: s, label: FILE_STATUS_LABELS[s] }))],
+                },
+              ]}
+              onClear={clearFilters}
+            />
+          }
           onRetry={(file) => {
-            setRetried(null);
+            const name = file.name?.trim() || `File #${file.id}`;
             retry.mutate(
               { fileId: file.id, sourceId: source.id },
-              { onSuccess: () => setRetried(file.name?.trim() || `File #${file.id}`) },
+              {
+                // Retry only re-queues the file (PENDING); the source's next sync processes it.
+                onSuccess: () =>
+                  toast.info(`“${name}” is queued again`, {
+                    description: `The next sync of this source processes it${active ? " (a sync is running now)" : ". Press Sync now to run one right away"}.`,
+                  }),
+              },
             );
           }}
           retryingId={retry.isPending ? retry.variables?.fileId : null}
         />
       </div>
-      <ListPager offset={offset} limit={FILES_PAGE_SIZE} total={total} onChange={setOffset} label="Files pages" />
     </section>
   );
 }
@@ -500,73 +486,55 @@ function EntitiesTab({ source }: { source: SourceOut }) {
   const total = entities.data?.total ?? 0;
 
   return (
-    <section aria-label="CRM entities" className="space-y-4">
-      <p className="text-xs text-muted-foreground" aria-live="polite">
-        {entities.data ? plural(total, "entity", "entities") : entities.isLoading ? "Loading entities…" : "—"} extracted from
-        this source's files. Click a row for its fields and where each value was found.
+    <section aria-label="Extracted CRM entities" className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Entities extracted from this source's files. Open a row for its fields and where each value was found.
       </p>
       <ErrorAlert message={entities.isError ? `Couldn't load the CRM entities: ${formatUserError(entities.error)}` : null} />
-      <div aria-busy={entities.isPlaceholderData} className={`transition-opacity ${entities.isPlaceholderData ? "opacity-60" : ""}`}>
+      <div aria-busy={entities.isPlaceholderData || undefined} className={cn("transition-opacity", entities.isPlaceholderData && "opacity-60")}>
         <CrmEntitiesTable
           entities={entities.data?.items ?? []}
           loading={entities.isLoading}
           filters={filters}
           onFiltersChange={onFiltersChange}
+          pagination={{
+            mode: "server",
+            page: Math.floor(offset / ENTITIES_PAGE_SIZE) + 1,
+            pageSize: ENTITIES_PAGE_SIZE,
+            total,
+            onPageChange: (page) => setOffset((page - 1) * ENTITIES_PAGE_SIZE),
+          }}
         />
       </div>
-      <ListPager offset={offset} limit={ENTITIES_PAGE_SIZE} total={total} onChange={setOffset} label="CRM entities pages" />
     </section>
   );
 }
 
 // ---- Empty state -----------------------------------------------------------------------------
 
-function EmptyState({ onConnect, disabled }: { onConnect: () => void; disabled: boolean }) {
+function NoSources({ onConnect, disabled }: { onConnect: () => void; disabled: boolean }) {
   return (
-    <section aria-labelledby="sharepoint-empty-title" className="rounded-xl border border-dashed border-border bg-card p-6 sm:p-8">
-      <div className="mx-auto max-w-2xl text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <FolderSync aria-hidden="true" className="h-6 w-6" />
-        </div>
-        <h2 id="sharepoint-empty-title" className="mt-4 text-lg font-semibold text-foreground">
-          No folders connected yet
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Connect a SharePoint or OneDrive folder. AIVA checks it for new, changed and deleted files, on a schedule or
-          when you press Sync now, and extracts organizations, contacts and document references into the CRM store.
-        </p>
-      </div>
-      <div className="mx-auto mt-6 grid max-w-3xl gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-border p-4">
-          <h3 className="text-sm font-semibold text-foreground">What it does</h3>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>Lists the folder (and its subfolders, if you choose) with read-only access.</li>
-            <li>
-              Processes new and changed PDF and Word files: download, extraction, CRM intelligence, entities, save to the
-              CRM store.
-            </li>
-            <li>Withdraws the entities of files that were deleted from the folder.</li>
-          </ul>
-        </div>
-        <div className="rounded-lg border border-border p-4">
-          <h3 className="text-sm font-semibold text-foreground">What you need</h3>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>A Microsoft Entra app registration: its Tenant ID, Client ID and a client secret.</li>
-            <li>
-              The <span className="font-medium text-foreground">Sites.Read.All</span> and{" "}
-              <span className="font-medium text-foreground">Files.Read.All</span> application permissions, with admin
-              consent.
-            </li>
-            <li>The site URL and, optionally, the library and folder to sync.</li>
-          </ul>
-        </div>
-      </div>
-      <div className="mt-6 text-center">
-        <Button onClick={onConnect} disabled={disabled}>
-          <Plus aria-hidden="true" className="mr-2 h-4 w-4" /> Connect a folder
-        </Button>
-      </div>
-    </section>
+    <Card>
+      <EmptyState
+        icon={FolderSync}
+        title="No folders connected yet"
+        description={
+          <>
+            Connect a SharePoint or OneDrive folder: AIVA lists it read-only, processes new and changed PDF and Word files into the CRM
+            store, and withdraws entities of deleted files. You need a Microsoft Entra app (Tenant ID, Client ID, client secret) with{" "}
+            <span className="font-medium text-foreground">Sites.Read.All</span> and{" "}
+            <span className="font-medium text-foreground">Files.Read.All</span> application permissions.
+          </>
+        }
+        action={
+          <Button onClick={onConnect} disabled={disabled}>
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            Connect a folder
+          </Button>
+        }
+        className="[&>p:last-of-type]:max-w-xl"
+      />
+    </Card>
   );
 }
 
@@ -604,21 +572,22 @@ export function SharePointSyncPage() {
     setDeleteError(null);
     try {
       await remove.mutateAsync(deleting.id);
+      toast.success("Source deleted", { description: deleting.name });
       setDeleting(null);
     } catch (e) {
       setDeleteError(formatUserError(e));
     }
   }
 
-  const header = (
-    <PageHeader
-      icon={FolderSync}
+  const heading = (
+    <PageHeading
       title="SharePoint Sync"
-      description="Connect SharePoint or OneDrive folders and sync their documents into the CRM store, automatically on a schedule or with Sync now."
+      description="Connect SharePoint or OneDrive folders and sync their documents into the CRM store, on a schedule or with Sync now."
       actions={
         unavailable ? undefined : (
           <Button onClick={() => setDialog({ source: null })} disabled={keyMissing || status.isLoading}>
-            <Plus aria-hidden="true" className="mr-2 h-4 w-4" /> Connect a folder
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            Connect a folder
           </Button>
         )
       }
@@ -627,33 +596,31 @@ export function SharePointSyncPage() {
 
   if (unavailable) {
     return (
-      <div className="space-y-6">
-        {header}
+      <Page width="wide">
+        {heading}
         <Notice tone="danger" title={unavailable.title}>
           {unavailable.message}
         </Notice>
-      </div>
+      </Page>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {header}
+    <Page width="wide">
+      {heading}
 
-      {status.isError && (
-        <ErrorAlert message={`Couldn't load the module status: ${formatUserError(status.error)}`} />
-      )}
+      {status.isError && <ErrorAlert message={`Couldn't load the module status: ${formatUserError(status.error)}`} />}
       {keyMissing && (
         <Notice tone="danger" title="Set DOC_INTEL_SECRETS_KEY on the server before saving credentials">
-          Microsoft credentials are stored encrypted with this key. Until it is set in the backend .env and the backend
-          restarted, sources can't be saved and stored credentials can't be read for tests or syncs. Generate a key with{" "}
+          Microsoft credentials are stored encrypted with this key. Until it is set in the backend .env and the backend restarted,
+          sources can't be saved and stored credentials can't be read for tests or syncs. Generate a key with{" "}
           <code className="font-mono text-xs">python -m backend.doc_intel.crypto generate-key</code>.
         </Notice>
       )}
       {st && !st.scheduler_enabled && scheduledSources > 0 && (
         <Notice tone="warning" title="Automatic syncs are off on this server (DOC_INTEL_SCHEDULER_ENABLED=false); use Sync now">
-          {scheduledSources === 1 ? "A source has" : `${scheduledSources} sources have`} an automatic schedule, but it
-          won't run until the scheduler is turned on.
+          {scheduledSources === 1 ? "A source has" : `${scheduledSources} sources have`} an automatic schedule, but it won't run until
+          the scheduler is turned on.
         </Notice>
       )}
       {st && !st.sync_worker_running && (
@@ -663,8 +630,8 @@ export function SharePointSyncPage() {
       )}
       {st && !st.extraction_available && (
         <Notice tone="warning" title="Text extraction is unavailable">
-          {st.extraction_unavailable_reason || "The document extractor is not available on the server."} Synced files
-          fail at the extraction stage until this is fixed.
+          {st.extraction_unavailable_reason || "The document extractor is not available on the server."} Synced files fail at the
+          extraction stage until this is fixed.
         </Notice>
       )}
       <ErrorAlert message={sources.isError ? `Couldn't load the sources: ${formatUserError(sources.error)}` : null} />
@@ -672,22 +639,22 @@ export function SharePointSyncPage() {
       {/* isPending, not isLoading: while the query still waits for /status it is idle, and the empty
           state must not flash before the real list arrives. */}
       {sources.isPending ? (
-        <Placeholder>Loading sources…</Placeholder>
+        <div className="space-y-4" aria-busy="true">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-64 w-full rounded-lg" />
+        </div>
       ) : sources.isError ? null : list.length === 0 ? (
-        <EmptyState onConnect={() => setDialog({ source: null })} disabled={keyMissing || status.isLoading} />
+        <NoSources onConnect={() => setDialog({ source: null })} disabled={keyMissing || status.isLoading} />
       ) : (
         <>
           <section aria-labelledby="sharepoint-sources-title" className="space-y-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 id="sharepoint-sources-title" className="text-lg font-semibold text-foreground">
-                Connected folders
+              <h2 id="sharepoint-sources-title" className="text-base font-semibold text-foreground">
+                Connected folders <span className="ml-1 text-sm font-normal text-muted-foreground">{list.length}</span>
               </h2>
-              <p className="text-xs text-muted-foreground" aria-live="polite">
-                {plural(list.length, "source")}
-                {anyActive ? " · refreshing every 3 s while a sync runs" : ""}
-              </p>
+              {anyActive && <AutoRefreshIndicator intervalMs={SYNC_REFETCH_MS} fetching={sources.isFetching} />}
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {list.map((s) => (
                 <SourceCard
                   key={s.id}
@@ -706,45 +673,43 @@ export function SharePointSyncPage() {
           </section>
 
           {selected && (
-            <section id={DETAILS_ID} aria-labelledby={`${DETAILS_ID}-title`} className="scroll-mt-20 space-y-4">
+            <section id={DETAILS_ID} aria-labelledby={`${DETAILS_ID}-title`} className="scroll-mt-4 space-y-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
-                <h2 id={`${DETAILS_ID}-title`} className="min-w-0 break-words text-lg font-semibold text-foreground">
-                  {selected.name}: sync details
+                <h2 id={`${DETAILS_ID}-title`} className="min-w-0 break-words text-base font-semibold text-foreground">
+                  <bdi>{selected.name}</bdi>: sync details
                 </h2>
                 {list.length > 1 && (
-                  <div className="w-full sm:w-72">
-                    <Label htmlFor="sharepoint-details-source">Source</Label>
-                    <Select
-                      id="sharepoint-details-source"
-                      value={String(selected.id)}
-                      onChange={(e) => setSelectedId(Number(e.target.value))}
-                      className="mt-1"
-                    >
-                      {list.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
+                  <Select
+                    aria-label="Source"
+                    value={String(selected.id)}
+                    onChange={(e) => setSelectedId(Number(e.target.value))}
+                    className="w-full sm:w-72"
+                    controlSize="sm"
+                  >
+                    {list.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-                {TABS.map((t) => (
-                  <Button
-                    key={t.id}
-                    variant={tab === t.id ? "default" : "outline"}
-                    size="sm"
-                    aria-pressed={tab === t.id}
-                    onClick={() => setTab(t.id)}
-                  >
-                    {t.label}
-                  </Button>
-                ))}
-              </div>
-              {tab === "runs" && <RunsTab key={selected.id} source={selected} />}
-              {tab === "files" && <FilesTab key={selected.id} source={selected} />}
-              {tab === "entities" && <EntitiesTab key={selected.id} source={selected} />}
+              <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
+                <TabsList aria-label="Sync details">
+                  <TabsTrigger value="runs">Sync history</TabsTrigger>
+                  <TabsTrigger value="files">Files</TabsTrigger>
+                  <TabsTrigger value="entities">Extracted CRM entities</TabsTrigger>
+                </TabsList>
+                <TabsContent value="runs">
+                  <RunsTab key={selected.id} source={selected} />
+                </TabsContent>
+                <TabsContent value="files">
+                  <FilesTab key={selected.id} source={selected} />
+                </TabsContent>
+                <TabsContent value="entities">
+                  <EntitiesTab key={selected.id} source={selected} />
+                </TabsContent>
+              </Tabs>
             </section>
           )}
         </>
@@ -766,10 +731,11 @@ export function SharePointSyncPage() {
         title="Delete this source?"
         message={
           deleting
-            ? `“${deleting.name}” stops syncing and is removed from this page, and its stored client secret is erased. Its sync history is kept, and its extracted CRM entities are kept as withdrawn. A source cannot be deleted while a sync is queued or running — wait for it to finish first.`
+            ? `“${deleting.name}” stops syncing and is removed from this page, and its stored client secret is erased. Its sync history is kept, and its extracted CRM entities are kept as withdrawn. A source cannot be deleted while a sync is queued or running: wait for it to finish first.`
             : ""
         }
         confirmLabel="Delete"
+        loadingLabel="Deleting…"
         destructive
         loading={remove.isPending}
         error={deleteError}
@@ -780,6 +746,6 @@ export function SharePointSyncPage() {
           setDeleteError(null);
         }}
       />
-    </div>
+    </Page>
   );
 }

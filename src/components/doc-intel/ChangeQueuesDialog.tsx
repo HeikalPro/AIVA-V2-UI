@@ -3,8 +3,18 @@ import { useAccountKbQueues } from "@/hooks/useAccounts";
 import { useChangeKbDocumentQueues } from "@/hooks/useDocumentImport";
 import { formatUserError } from "@/lib/errors";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "@/components/ui/toast";
 import { QueueMultiSelect } from "@/components/doc-intel/QueueMultiSelect";
 import type { KbDocumentOut } from "@/types/api";
 
@@ -47,6 +57,7 @@ export function ChangeQueuesDialog({ document: doc, onClose }: Props) {
     setError(null);
     try {
       await change.mutateAsync({ id: doc.id, queueKeys: effective });
+      toast.success("Queues updated", { description: doc.filename });
       onClose();
     } catch (e) {
       setError(formatUserError(e));
@@ -54,17 +65,17 @@ export function ChangeQueuesDialog({ document: doc, onClose }: Props) {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !change.isPending && onClose()} size="max-w-xl">
+    <Dialog open onOpenChange={(open) => !open && !change.isPending && onClose()} size="md">
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Change queues</DialogTitle>
-          <p className="mt-1 break-words text-sm text-muted-foreground">
-            {doc.filename} · {doc.organization_name ? `${doc.organization_name} · ` : ""}
+          <DialogDescription className="break-words">
+            <bdi>{doc.filename}</bdi> · {doc.organization_name ? `${doc.organization_name} · ` : ""}
             {doc.account_name ?? `Account #${doc.account_id}`}
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <DialogBody className="space-y-4">
           <QueueMultiSelect
             queues={queues}
             selected={effective}
@@ -74,23 +85,21 @@ export function ChangeQueuesDialog({ document: doc, onClose }: Props) {
             disabled={change.isPending}
           />
           {retired.length > 0 && (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              No longer offered by this knowledge base: {retired.map((q) => q.label).join(", ")}. Saving removes the
-              document from {retired.length === 1 ? "it" : "them"}.
-            </p>
+            <Alert tone="warning">
+              No longer offered by this knowledge base: {retired.map((q) => q.label).join(", ")}. Saving removes the document from{" "}
+              {retired.length === 1 ? "it" : "them"}.
+            </Alert>
           )}
-          <p className="text-xs text-muted-foreground">
-            Only the queue assignment changes — the document is not re-processed or re-embedded.
-          </p>
+          <p className="text-xs text-muted-foreground">Only the queue assignment changes: the document is not re-processed or re-embedded.</p>
           <ErrorAlert message={error} />
-        </div>
+        </DialogBody>
 
-        <DialogFooter className="flex-wrap items-center">
+        <DialogFooter>
           {catalogReady && blocker && <p className="mr-auto text-xs text-muted-foreground">{blocker}</p>}
           <Button variant="outline" onClick={onClose} disabled={change.isPending}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!catalogReady || blocker != null || change.isPending}>
+          <Button onClick={handleSave} disabled={!catalogReady || blocker != null} loading={change.isPending}>
             {change.isPending ? "Saving…" : "Save queues"}
           </Button>
         </DialogFooter>

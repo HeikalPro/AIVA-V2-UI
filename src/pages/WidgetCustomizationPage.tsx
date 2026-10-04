@@ -1,1081 +1,619 @@
-import { useEffect, useMemo, useState } from "react";
-import { Calculator, Check, LogOut, MapPin, Minus, Phone, Plus, SendHorizontal, SlidersHorizontal, SquarePen, Trash2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Building2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { ROLES } from "@/lib/roles";
 import { formatUserError } from "@/lib/errors";
-import { useAccounts, useAccountKbQueues, useUpdateAccount } from "@/hooks/useAccounts";
-import { PageHeader } from "@/components/shared/PageHeader";
+import { useAccountKbQueues, useUpdateAccount } from "@/hooks/useAccounts";
+import { Page, PageHeading } from "@/components/shell/page";
+import { EmptyState } from "@/components/data/empty-state";
+import { Status } from "@/components/data/status";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ColorInput } from "@/components/ui/color-input";
+import { Field, FieldGroup, FormSection } from "@/components/ui/field";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
+import { ToggleChip } from "@/components/widget-config/ToggleChip";
+import { DEFAULT_WIDGET_ACCENT, WidgetPreview, type WidgetPreviewPanel } from "@/components/widget-config/WidgetPreview";
 import {
-  ALL_CALCULATOR_TYPES,
-  buildCalculatorProductsPayload,
+  buildWidgetFeatures,
+  EMPTY_LOCATION,
+  formFromAccount,
+  type LocationForm,
+  type WidgetForm,
+} from "@/components/widget-config/widget-form";
+import {
   CALCULATOR_TENOR_OPTIONS,
   CALCULATOR_TYPE_OPTIONS,
-  calculatorProductsFromAccount,
   defaultCalculatorLabel,
   type CalculatorProductForm,
   type CalculatorTypeKey,
 } from "@/lib/calculatorDefaults";
-import type { Account, KbQueueGroup, WidgetFeatures, WidgetLocationItem } from "@/types/api";
+import type { Account, KbQueueGroup } from "@/types/api";
 
-// ---------------------------------------------------------------------------
-// Preview-only installment math — mirrors AIVA-widget/utils/installmentCalculator.ts
-// (declining-balance for APR products, flat-rate for instant approval). Kept
-// local because the widget is a separate app we can't import from.
-// ---------------------------------------------------------------------------
-type PreviewRow = { months: number; installment: number; interest: number; flatPct: number };
-
-function amortizedInstallment(principal: number, apr: number, months: number): number {
-  const r = apr / 12;
-  if (r === 0) return Math.round(principal / months);
-  const factor = Math.pow(1 + r, months);
-  return Math.round((principal * r * factor) / (factor - 1));
-}
-
-function parsePercent(raw: string): number | null {
-  const n = Number.parseFloat((raw ?? "").trim());
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function computePreviewRows(
-  opt: (typeof CALCULATOR_TYPE_OPTIONS)[number],
-  product: CalculatorProductForm,
-  principal: number,
-): PreviewRow[] {
-  const tenors = (product.tenors.length > 0 ? [...product.tenors] : [...CALCULATOR_TENOR_OPTIONS]).sort(
-    (a, b) => a - b,
-  );
-  const rows: PreviewRow[] = [];
-  for (const months of tenors) {
-    if (opt.usesApr) {
-      const apr = parsePercent(product.aprPercent);
-      if (apr == null) continue;
-      const installment = amortizedInstallment(principal, apr / 100, months);
-      const interest = installment * months - principal;
-      const flatPct = Math.round((interest / (principal * months)) * 10_000) / 100;
-      rows.push({ months, installment, interest, flatPct });
-    } else {
-      const flat = parsePercent(product.flatRatePercents[String(months)] ?? "");
-      if (flat == null) continue;
-      const dec = flat / 100;
-      const interest = Math.round(principal * dec * months);
-      const installment = Math.round((principal + interest) / months);
-      rows.push({ months, installment, interest, flatPct: dec * 100 });
-    }
-  }
-  return rows;
-}
-
-const egp = (n: number) => n.toLocaleString("en-US");
-
-// ---------------------------------------------------------------------------
-// Accent color helpers for the live preview (mirror the widget's shade math).
-// ---------------------------------------------------------------------------
-const DEFAULT_ACCENT = "#0057a8";
-const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
-
-function hexToRgb(hex: string): [number, number, number] | null {
-  let h = hex.replace("#", "").trim();
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  if (h.length !== 6) return null;
-  const n = Number.parseInt(h, 16);
-  if (Number.isNaN(n)) return null;
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function shade([r, g, b]: [number, number, number], target: number, amt: number): string {
-  const m = (c: number) => Math.round(c + (target - c) * amt);
-  return `rgb(${m(r)}, ${m(g)}, ${m(b)})`;
-}
-
-/** { base, dark, light } CSS colors for the preview, from an accent hex (or default). */
-function accentShades(accent: string) {
-  const rgb = hexToRgb(HEX_RE.test(accent) ? accent : DEFAULT_ACCENT) ?? [0, 87, 168];
-  return {
-    base: `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`,
-    dark: shade(rgb, 0, 0.28),
-    light: shade(rgb, 255, 0.14),
-    soft: `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.1)`,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Form helpers
-// ---------------------------------------------------------------------------
-function calculatorTypesFromAccount(acc: Account | null): CalculatorTypeKey[] {
-  const types = acc?.widget_features?.installment_calculator?.types;
-  if (Array.isArray(types) && types.length > 0) {
-    return types.filter((t): t is CalculatorTypeKey =>
-      ALL_CALCULATOR_TYPES.includes(t as CalculatorTypeKey),
-    );
-  }
-  return [...ALL_CALCULATOR_TYPES];
-}
-
-type LocationForm = {
-  name: string;
-  area: string;
-  address: string;
-  phone: string;
-  hours: string;
-  mapsUrl: string;
-};
-
-const EMPTY_LOCATION: LocationForm = { name: "", area: "", address: "", phone: "", hours: "", mapsUrl: "" };
-
-function locationsFromAccount(acc: Account | null): LocationForm[] {
-  const items = acc?.widget_features?.locations?.items;
-  if (!Array.isArray(items)) return [];
-  return items.map((it) => ({
-    name: it.name ?? "",
-    area: it.area ?? "",
-    address: it.address ?? "",
-    phone: it.phone ?? "",
-    hours: it.hours ?? "",
-    mapsUrl: it.maps_url ?? "",
-  }));
-}
-
-type WidgetForm = {
-  calcEnabled: boolean;
-  calcTypes: CalculatorTypeKey[];
-  calcProducts: Record<CalculatorTypeKey, CalculatorProductForm>;
-  kbOverride: boolean;
-  kbVisibleKeys: string[];
-  brandTitle: string;
-  brandSubtitle: string;
-  brandAccent: string;
-  brandLogoUrl: string;
-  locEnabled: boolean;
-  locations: LocationForm[];
-};
-
-function formFromAccount(acc: Account | null): WidgetForm {
-  const calc = acc?.widget_features?.installment_calculator;
-  const kb = acc?.widget_features?.kb_queues;
-  const brand = acc?.widget_features?.branding;
-  const kbOverride = kb != null && Array.isArray(kb.visible_keys);
-  return {
-    calcEnabled: calc?.enabled ?? false,
-    calcTypes: calculatorTypesFromAccount(acc),
-    calcProducts: calculatorProductsFromAccount(
-      calc?.types ?? [],
-      calc?.products,
-    ),
-    kbOverride,
-    kbVisibleKeys: kbOverride ? [...(kb!.visible_keys as string[])] : [],
-    brandTitle: brand?.title ?? "",
-    brandSubtitle: brand?.subtitle ?? "",
-    brandAccent: brand?.accent_color ?? "",
-    brandLogoUrl: brand?.logo_url ?? "",
-    locEnabled: acc?.widget_features?.locations?.enabled ?? false,
-    locations: locationsFromAccount(acc),
-  };
-}
-
-function buildWidgetFeatures(form: WidgetForm): WidgetFeatures {
-  const activeTypes = form.calcEnabled ? form.calcTypes : [];
-  const branding = {
-    title: form.brandTitle.trim() || null,
-    subtitle: form.brandSubtitle.trim() || null,
-    accent_color: form.brandAccent.trim() || null,
-    logo_url: form.brandLogoUrl.trim() || null,
-  };
-  const hasBranding = Object.values(branding).some((v) => v != null);
-  const locationItems: WidgetLocationItem[] = form.locations
-    .filter((l) => l.name.trim())
-    .map((l) => ({
-      name: l.name.trim(),
-      area: l.area.trim() || null,
-      address: l.address.trim() || null,
-      phone: l.phone.trim() || null,
-      hours: l.hours.trim() || null,
-      maps_url: l.mapsUrl.trim() || null,
-    }));
-  const wf: WidgetFeatures = {
-    installment_calculator: {
-      enabled: form.calcEnabled,
-      types: activeTypes,
-      products: form.calcEnabled
-        ? buildCalculatorProductsPayload(activeTypes, form.calcProducts)
-        : undefined,
-    },
-    // null clears the override (widget shows every allowed KB button).
-    kb_queues: form.kbOverride ? { visible_keys: form.kbVisibleKeys } : null,
-    // null clears branding back to defaults.
-    branding: hasBranding ? branding : null,
-    // null clears the section entirely when it's off and empty.
-    locations:
-      form.locEnabled || locationItems.length > 0
-        ? { enabled: form.locEnabled, items: locationItems }
-        : null,
-  };
-  return wf;
-}
-
-// Shared class for the widget header's round icon buttons (mirrors ChatPanel).
-const headerIconBtn =
-  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600";
+type ConfigTab = "appearance" | "knowledge" | "calculator" | "locations";
 
 export function WidgetCustomizationPage() {
   const { user } = useAuth();
-  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
-  const { data: accounts = [], isLoading: accountsLoading } = useAccounts(
-    isSuperAdmin ? null : user?.organization_id,
-  );
+  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
+  const workspace = useWorkspace();
+  const account = workspace.account;
+  const accountId = workspace.accountId;
   const updateAccount = useUpdateAccount();
+  const kbQuery = useAccountKbQueues(accountId);
+  const kbCatalog = useMemo(() => kbQuery.data ?? [], [kbQuery.data]);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const selectedAccount = useMemo(
-    () => accounts.find((a) => a.id === selectedId) ?? null,
-    [accounts, selectedId],
+  const [form, setForm] = useState<WidgetForm>(() => formFromAccount(account));
+  const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<ConfigTab>("appearance");
+  const [panel, setPanel] = useState<WidgetPreviewPanel>("chat");
+
+  // Reset the form whenever the account (or its saved data) changes — e.g. after a save the
+  // accounts query refetches and the form reloads from the server.
+  const [formSource, setFormSource] = useState<Account | null>(account);
+  if (formSource !== account) {
+    const switchedAccount = formSource?.id !== account?.id;
+    setFormSource(account);
+    setForm(formFromAccount(account));
+    setError(null);
+    if (switchedAccount) setPanel("chat");
+  }
+
+  const baseline = useMemo(() => formFromAccount(account), [account]);
+  const dirty = useMemo(
+    () => JSON.stringify(buildWidgetFeatures(form)) !== JSON.stringify(buildWidgetFeatures(baseline)),
+    [form, baseline],
   );
 
-  const { data: kbCatalog = [] } = useAccountKbQueues(selectedId);
-
-  const [form, setForm] = useState<WidgetForm>(() => formFromAccount(null));
-  const [error, setError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
-
-  // Preview mirrors the real widget: the calculator/locations buttons open panels.
-  const [previewCalcOpen, setPreviewCalcOpen] = useState(false);
-  const [previewLocOpen, setPreviewLocOpen] = useState(false);
-  const [previewPrincipal, setPreviewPrincipal] = useState("10000");
-  const [previewType, setPreviewType] = useState<CalculatorTypeKey | null>(null);
-
-  // Default to the first account once loaded.
-  useEffect(() => {
-    if (selectedId == null && accounts.length > 0) setSelectedId(accounts[0].id);
-  }, [accounts, selectedId]);
-
-  // Reset the form whenever the selected account changes.
-  useEffect(() => {
-    setForm(formFromAccount(selectedAccount));
-    setError(null);
-    setSavedAt(null);
-    setPreviewCalcOpen(false);
-    setPreviewLocOpen(false);
-    setPreviewPrincipal("10000");
-  }, [selectedAccount]);
-
-  const patch = <K extends keyof WidgetForm>(key: K, value: WidgetForm[K]) =>
-    setForm((f) => ({ ...f, [key]: value }));
+  const patch = <K extends keyof WidgetForm>(key: K, value: WidgetForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   function setProduct(typeKey: CalculatorTypeKey, next: CalculatorProductForm) {
-    setForm((f) => ({
-      ...f,
-      calcProducts: { ...f.calcProducts, [typeKey]: next },
-    }));
+    setForm((f) => ({ ...f, calcProducts: { ...f.calcProducts, [typeKey]: next } }));
   }
 
   function setLocation(index: number, next: LocationForm) {
-    setForm((f) => ({
-      ...f,
-      locations: f.locations.map((l, i) => (i === index ? next : l)),
-    }));
+    setForm((f) => ({ ...f, locations: f.locations.map((l, i) => (i === index ? next : l)) }));
   }
 
   async function handleSave() {
-    if (!selectedAccount) return;
+    if (!account) return;
     setError(null);
-    setSavedAt(null);
     try {
       await updateAccount.mutateAsync({
-        id: selectedAccount.id,
+        id: account.id,
         body: { widget_features: buildWidgetFeatures(form) },
       });
-      setSavedAt(Date.now());
+      toast.success(`Widget settings saved for ${account.name}`);
     } catch (e) {
       setError(formatUserError(e));
     }
   }
 
-  // KB buttons shown in the preview: override list, else the whole catalog.
-  const previewKbKeys = form.kbOverride
-    ? form.kbVisibleKeys
-    : kbCatalog.map((q) => q.key);
-  const kbLabel = (key: string) =>
-    kbCatalog.find((q) => q.key === key)?.label ?? key;
+  function changeTab(next: string) {
+    const value = next as ConfigTab;
+    setTab(value);
+    // Show the part of the widget being edited.
+    if (value === "calculator") setPanel(form.calcEnabled ? "calculator" : "chat");
+    else if (value === "locations") setPanel(form.locEnabled ? "locations" : "chat");
+    else setPanel("chat");
+  }
 
-  // Display name for a calculator product: custom label, else the default.
-  const productLabel = (key: CalculatorTypeKey) =>
-    form.calcProducts[key]?.label.trim() || defaultCalculatorLabel(key);
+  const productLabel = (key: CalculatorTypeKey) => form.calcProducts[key]?.label.trim() || defaultCalculatorLabel(key);
 
-  // Branding preview values.
-  const accent = accentShades(form.brandAccent || DEFAULT_ACCENT);
-  const previewTitle = form.brandTitle.trim() || "GoChat247";
-  const previewSubtitle = form.brandSubtitle.trim() || "AI assistant";
-  const previewLogo = form.brandLogoUrl.trim();
+  // KB buttons shown in the preview: the override list, else the whole catalog.
+  const previewKbKeys = form.kbOverride ? form.kbVisibleKeys : kbCatalog.map((q) => q.key);
+  const kbLabel = (key: string) => kbCatalog.find((q) => q.key === key)?.label ?? key;
 
-  // Derived preview values (kept valid without extra effects).
-  const enabledTypes = form.calcEnabled ? form.calcTypes : [];
-  const activePreviewType =
-    previewType && enabledTypes.includes(previewType) ? previewType : enabledTypes[0] ?? null;
-  const activePreviewOption = CALCULATOR_TYPE_OPTIONS.find((o) => o.key === activePreviewType);
-  const calcPanelOpen = previewCalcOpen && form.calcEnabled;
-  const previewLocations = form.locations.filter((l) => l.name.trim());
-  const locPanelOpen = previewLocOpen && form.locEnabled && !calcPanelOpen;
-  const principalValue = parsePercent(previewPrincipal);
-  const previewRows =
-    calcPanelOpen && activePreviewOption && principalValue != null
-      ? computePreviewRows(
-          activePreviewOption,
-          form.calcProducts[activePreviewOption.key as CalculatorTypeKey],
-          principalValue,
-        )
-      : [];
+  const heading = (
+    <PageHeading
+      title="Widget Configuration"
+      description={
+        account
+          ? `Branding, knowledge buttons, installment calculator and branch locations of ${account.name}'s desktop widget.`
+          : "Branding, knowledge buttons, installment calculator and branch locations of the desktop widget."
+      }
+    />
+  );
 
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={SlidersHorizontal}
-        title="Widget customization"
-        description="Turn widget features on or off and edit their values per account — no code needed."
-        actions={
-          <div className="flex items-center gap-2">
-            <Label className="hidden text-xs text-muted-foreground sm:block">Account</Label>
-            <Select
-              value={selectedId ?? ""}
-              onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : null)}
-              className="min-w-[200px]"
-              disabled={accountsLoading || accounts.length === 0}
-            >
-              {accounts.length === 0 && <option value="">No accounts</option>}
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
+  if (workspace.isLoading) {
+    return (
+      <Page width="default">
+        {heading}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]" aria-busy="true">
+          <div className="space-y-5">
+            <Skeleton className="h-10 w-full max-w-md" />
+            <Skeleton className="h-5 w-48" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 4 }, (_, i) => (
+                <Skeleton key={i} className="h-16" />
               ))}
-            </Select>
-          </div>
-        }
-      />
-
-      {selectedAccount == null ? (
-        <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          {accountsLoading ? "Loading accounts…" : "Select an account to customize its widget."}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
-          {/* ---------------- Controls ---------------- */}
-          <div className="space-y-6">
-            <ErrorAlert message={error} />
-
-            {/* Branding */}
-            <section className="rounded-xl border border-border bg-card p-5">
-              <div>
-                <span className="block text-sm font-semibold text-slate-800">Branding</span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Header title, subtitle, accent color, and logo for this account's widget.
-                </span>
-              </div>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <Label className="text-xs">Title</Label>
-                  <Input
-                    value={form.brandTitle}
-                    onChange={(e) => patch("brandTitle", e.target.value)}
-                    placeholder="GoChat247"
-                    className="mt-1 h-9"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Subtitle</Label>
-                  <Input
-                    value={form.brandSubtitle}
-                    onChange={(e) => patch("brandSubtitle", e.target.value)}
-                    placeholder="AI assistant"
-                    className="mt-1 h-9"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Accent color</Label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={HEX_RE.test(form.brandAccent) ? form.brandAccent : DEFAULT_ACCENT}
-                      onChange={(e) => patch("brandAccent", e.target.value)}
-                      className="h-9 w-10 shrink-0 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-                      aria-label="Accent color"
-                    />
-                    <Input
-                      value={form.brandAccent}
-                      onChange={(e) => patch("brandAccent", e.target.value)}
-                      placeholder="#0057A8"
-                      className="h-9"
-                    />
-                    {form.brandAccent && (
-                      <button
-                        type="button"
-                        onClick={() => patch("brandAccent", "")}
-                        className="shrink-0 text-xs text-muted-foreground hover:text-slate-700"
-                        title="Reset to default"
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </div>
-                  {form.brandAccent !== "" && !HEX_RE.test(form.brandAccent) && (
-                    <p className="mt-1 text-[11px] text-amber-600">Enter a hex color like #0057A8.</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-xs">Logo URL</Label>
-                  <Input
-                    value={form.brandLogoUrl}
-                    onChange={(e) => patch("brandLogoUrl", e.target.value)}
-                    placeholder="https://…/logo.png"
-                    className="mt-1 h-9"
-                  />
-                </div>
-              </div>
-            </section>
-
-            {/* Installment calculator */}
-            <section className="rounded-xl border border-border bg-card p-5">
-              <label className="flex cursor-pointer items-start justify-between gap-3">
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">Installment calculator</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Shows a loan/installment calculator button in the widget.
-                  </span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={form.calcEnabled}
-                  onChange={(e) => patch("calcEnabled", e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300"
-                />
-              </label>
-
-              {form.calcEnabled && (
-                <div className="mt-4 space-y-3">
-                  {CALCULATOR_TYPE_OPTIONS.map((opt) => {
-                    const typeKey = opt.key as CalculatorTypeKey;
-                    const on = form.calcTypes.includes(typeKey);
-                    const product = form.calcProducts[typeKey];
-                    return (
-                      <div key={opt.key} className="rounded-lg border border-slate-200 bg-white p-3">
-                        <label className="flex cursor-pointer items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={() => {
-                              const next = on
-                                ? form.calcTypes.filter((t) => t !== typeKey)
-                                : [...form.calcTypes, typeKey];
-                              if (next.length === 0) return; // keep at least one product
-                              patch("calcTypes", next);
-                            }}
-                            className="h-3.5 w-3.5 rounded border-slate-300"
-                          />
-                          <span className="text-sm font-medium text-slate-800">{productLabel(typeKey)}</span>
-                          {productLabel(typeKey) !== opt.label && (
-                            <span className="text-[11px] text-slate-400">({opt.label})</span>
-                          )}
-                        </label>
-
-                        {on && (
-                          <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
-                            <div>
-                              <Label className="text-xs">Display name</Label>
-                              <Input
-                                value={product.label}
-                                onChange={(e) => setProduct(typeKey, { ...product, label: e.target.value })}
-                                placeholder={defaultCalculatorLabel(typeKey)}
-                                className="mt-1 h-9"
-                              />
-                              <p className="mt-1 text-[11px] text-muted-foreground">
-                                Shown as the tab name in the widget. Leave blank to use "{defaultCalculatorLabel(typeKey)}".
-                              </p>
-                            </div>
-                            {opt.usesApr && (
-                              <div>
-                                <Label className="text-xs">APR (%)</Label>
-                                <Input
-                                  value={product.aprPercent}
-                                  onChange={(e) =>
-                                    setProduct(typeKey, { ...product, aprPercent: e.target.value })
-                                  }
-                                  placeholder="55"
-                                  className="mt-1 h-9"
-                                />
-                              </div>
-                            )}
-                            <div>
-                              <Label className="text-xs">Tenors (months)</Label>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                {CALCULATOR_TENOR_OPTIONS.map((month) => {
-                                  const tenorOn = product.tenors.includes(month);
-                                  return (
-                                    <button
-                                      key={month}
-                                      type="button"
-                                      onClick={() => {
-                                        const nextTenors = tenorOn
-                                          ? product.tenors.filter((t) => t !== month)
-                                          : [...product.tenors, month];
-                                        if (nextTenors.length === 0) return;
-                                        setProduct(typeKey, { ...product, tenors: nextTenors });
-                                      }}
-                                      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-                                        tenorOn
-                                          ? "border-gochat bg-gochat/10 text-gochat"
-                                          : "border-slate-300 bg-slate-50 text-slate-600"
-                                      }`}
-                                    >
-                                      {month}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                            {!opt.usesApr && (
-                              <div>
-                                <Label className="text-xs">Flat rate per month (%)</Label>
-                                <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                  {product.tenors.map((month) => (
-                                    <div key={month}>
-                                      <span className="text-[10px] text-muted-foreground">{month} mo</span>
-                                      <Input
-                                        value={product.flatRatePercents[String(month)] ?? ""}
-                                        onChange={(e) =>
-                                          setProduct(typeKey, {
-                                            ...product,
-                                            flatRatePercents: {
-                                              ...product.flatRatePercents,
-                                              [String(month)]: e.target.value,
-                                            },
-                                          })
-                                        }
-                                        className="mt-0.5 h-8 text-xs"
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            {/* KB buttons */}
-            <section className="rounded-xl border border-border bg-card p-5">
-              <label className="flex cursor-pointer items-start justify-between gap-3">
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">KB buttons</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Choose which knowledge-base buttons this account's widget shows.
-                  </span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={form.kbOverride}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    // When first turning the override on, start with everything visible.
-                    patch("kbOverride", on);
-                    if (on && form.kbVisibleKeys.length === 0) {
-                      patch("kbVisibleKeys", kbCatalog.map((q) => q.key));
-                    }
-                  }}
-                  className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300"
-                  disabled={kbCatalog.length === 0}
-                />
-              </label>
-
-              {kbCatalog.length === 0 ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  This account has no knowledge base configured, so there are no KB buttons to manage.
-                </p>
-              ) : !form.kbOverride ? (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Showing all buttons the account/agent allows ({kbCatalog.length}). Turn on to restrict.
-                </p>
-              ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {kbCatalog.map((q: KbQueueGroup) => {
-                    const checked = form.kbVisibleKeys.includes(q.key);
-                    return (
-                      <button
-                        key={q.key}
-                        type="button"
-                        onClick={() =>
-                          patch(
-                            "kbVisibleKeys",
-                            checked
-                              ? form.kbVisibleKeys.filter((k) => k !== q.key)
-                              : [...form.kbVisibleKeys, q.key],
-                          )
-                        }
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                          checked
-                            ? "border-gochat bg-gochat/10 text-gochat"
-                            : "border-slate-300 bg-slate-50 text-slate-500"
-                        }`}
-                      >
-                        {checked && <Check className="h-3 w-3" />}
-                        {q.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              {form.kbOverride && form.kbVisibleKeys.length === 0 && kbCatalog.length > 0 && (
-                <p className="mt-2 text-xs text-amber-600">
-                  No buttons selected — the widget will show no KB buttons for this account.
-                </p>
-              )}
-            </section>
-
-            {/* Locations */}
-            <section className="rounded-xl border border-border bg-card p-5">
-              <label className="flex cursor-pointer items-start justify-between gap-3">
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">Locations</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    Shows a branches/locations button in the widget listing this account's addresses.
-                  </span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={form.locEnabled}
-                  onChange={(e) => patch("locEnabled", e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-300"
-                />
-              </label>
-
-              {form.locEnabled && (
-                <div className="mt-4 space-y-3">
-                  {form.locations.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      No locations yet — add the first branch below.
-                    </p>
-                  )}
-                  {form.locations.map((loc, i) => (
-                    <div key={i} className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                          Location {i + 1}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            patch(
-                              "locations",
-                              form.locations.filter((_, idx) => idx !== i),
-                            )
-                          }
-                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-rose-600"
-                          title="Remove location"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Remove
-                        </button>
-                      </div>
-                      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <Label className="text-xs">Name *</Label>
-                          <Input
-                            value={loc.name}
-                            dir="auto"
-                            onChange={(e) => setLocation(i, { ...loc, name: e.target.value })}
-                            placeholder="Main branch"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Area / district</Label>
-                          <Input
-                            value={loc.area}
-                            dir="auto"
-                            onChange={(e) => setLocation(i, { ...loc, area: e.target.value })}
-                            placeholder="Maadi"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <Label className="text-xs">Address</Label>
-                          <Input
-                            value={loc.address}
-                            dir="auto"
-                            onChange={(e) => setLocation(i, { ...loc, address: e.target.value })}
-                            placeholder="Street, building, nearby landmark…"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Phone / hotline</Label>
-                          <Input
-                            value={loc.phone}
-                            dir="auto"
-                            onChange={(e) => setLocation(i, { ...loc, phone: e.target.value })}
-                            placeholder="16134"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Working hours</Label>
-                          <Input
-                            value={loc.hours}
-                            dir="auto"
-                            onChange={(e) => setLocation(i, { ...loc, hours: e.target.value })}
-                            placeholder="Sat–Thu 9am–5pm"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <Label className="text-xs">Google Maps URL</Label>
-                          <Input
-                            value={loc.mapsUrl}
-                            onChange={(e) => setLocation(i, { ...loc, mapsUrl: e.target.value })}
-                            placeholder="https://maps.google.com/…"
-                            className="mt-1 h-9"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => patch("locations", [...form.locations, { ...EMPTY_LOCATION }])}
-                  >
-                    <Plus className="mr-1 h-3.5 w-3.5" /> Add location
-                  </Button>
-                  {form.locEnabled && form.locations.every((l) => !l.name.trim()) && form.locations.length > 0 && (
-                    <p className="text-xs text-amber-600">
-                      Locations need at least a name to be saved and shown.
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-
-            <div className="flex items-center gap-3">
-              <Button onClick={handleSave} disabled={updateAccount.isPending}>
-                {updateAccount.isPending ? "Saving…" : "Save changes"}
-              </Button>
-              {savedAt != null && (
-                <span className="inline-flex items-center gap-1 text-sm text-emerald-600">
-                  <Check className="h-4 w-4" /> Saved
-                </span>
-              )}
             </div>
           </div>
+          <Skeleton className="h-[460px] w-full max-w-[360px] rounded-xl" />
+        </div>
+      </Page>
+    );
+  }
 
-          {/* ---------------- Live preview (mirrors the real widget) ---------------- */}
-          <div className="lg:sticky lg:top-20 lg:self-start">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Live preview</p>
-            <div className="mx-auto flex h-[460px] w-full max-w-[360px] flex-col overflow-hidden rounded-2xl border-2 border-[#94a3b8] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.16),0_6px_16px_rgba(0,87,168,0.1)]">
-              {/* gradient accent bar */}
-              <div
-                className="h-1 shrink-0"
-                style={{ background: `linear-gradient(to right, ${accent.dark}, ${accent.base}, ${accent.light})` }}
-              />
+  if (account == null) {
+    return (
+      <Page width="default">
+        {heading}
+        <EmptyState
+          icon={Building2}
+          title="No account selected"
+          description={
+            isSuperAdmin
+              ? "There are no accounts yet. Create one on the Accounts page to configure its widget."
+              : "You don't have access to any account yet. Ask an administrator to add you to one."
+          }
+        />
+      </Page>
+    );
+  }
 
-              {/* header */}
-              <header className="flex shrink-0 items-center gap-3 border-b border-[#cbd5e1] bg-white px-3.5 py-2.5">
-                <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-[#94a3b8] bg-white p-0.5">
-                    <img
-                      src={previewLogo || "/GoChat247_blue_transparent.png"}
-                      alt=""
-                      className="h-full w-full object-contain"
+  return (
+    <Page width="default">
+      {heading}
+
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        {/* ---------------- Configuration ---------------- */}
+        <div className="min-w-0 space-y-5">
+          <ErrorAlert message={error} />
+
+          <Tabs value={tab} onValueChange={changeTab} className="gap-5">
+            <TabsList aria-label="Widget settings">
+              <TabsTrigger value="appearance">Appearance</TabsTrigger>
+              <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
+              <TabsTrigger value="calculator">Calculator</TabsTrigger>
+              <TabsTrigger value="locations">Locations</TabsTrigger>
+            </TabsList>
+
+            {/* Appearance */}
+            <TabsContent value="appearance">
+              <FormSection title="Branding" description="Header title, subtitle, brand colour and logo shown in this account's widget.">
+                <FieldGroup columns={2}>
+                  <Field label="Title" hint='Leave blank to show "GoChat247".'>
+                    <Input
+                      dir="auto"
+                      value={form.brandTitle}
+                      onChange={(e) => patch("brandTitle", e.target.value)}
+                      placeholder="GoChat247"
                     />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold tracking-tight text-slate-900">{previewTitle}</p>
-                    <p className="truncate text-[10px] font-medium" style={{ color: accent.base }}>
-                      {selectedAccount.name} · {previewSubtitle}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  {form.calcEnabled && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewCalcOpen((o) => !o);
-                        setPreviewLocOpen(false);
-                      }}
-                      title={calcPanelOpen ? "Back to chat" : "Installment calculator"}
-                      className={headerIconBtn}
-                      style={
-                        calcPanelOpen
-                          ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }
-                          : undefined
-                      }
-                    >
-                      <Calculator className="h-[18px] w-[18px]" />
-                    </button>
-                  )}
-                  {form.locEnabled && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewLocOpen((o) => !o);
-                        setPreviewCalcOpen(false);
-                      }}
-                      title={locPanelOpen ? "Back to chat" : "Locations"}
-                      className={headerIconBtn}
-                      style={
-                        locPanelOpen
-                          ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }
-                          : undefined
-                      }
-                    >
-                      <MapPin className="h-[18px] w-[18px]" />
-                    </button>
-                  )}
-                  <span className={headerIconBtn}>
-                    <SquarePen className="h-[18px] w-[18px]" />
-                  </span>
-                  <span className={headerIconBtn}>
-                    <LogOut className="h-[18px] w-[18px]" />
-                  </span>
-                  <span className="ml-0.5 flex items-center gap-0.5 border-l border-[#94a3b8] pl-1">
-                    <span className={headerIconBtn}>
-                      <Minus className="h-[18px] w-[18px]" />
-                    </span>
-                    <span className={headerIconBtn}>
-                      <X className="h-[18px] w-[18px]" />
-                    </span>
-                  </span>
-                </div>
-              </header>
+                  </Field>
+                  <Field label="Subtitle" hint='Shown after the account name. Blank shows "AI assistant".'>
+                    <Input
+                      dir="auto"
+                      value={form.brandSubtitle}
+                      onChange={(e) => patch("brandSubtitle", e.target.value)}
+                      placeholder="AI assistant"
+                    />
+                  </Field>
+                  <Field
+                    label="Brand colour"
+                    htmlFor="widget-accent"
+                    hint={
+                      form.brandAccent
+                        ? "Accent for the header bar, KB buttons, active tabs and the send button."
+                        : `Using the widget default (${DEFAULT_WIDGET_ACCENT.toUpperCase()}).`
+                    }
+                    labelAction={
+                      form.brandAccent ? (
+                        <Button variant="link" size="sm" className="h-5 px-0 text-xs" onClick={() => patch("brandAccent", "")}>
+                          <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+                          Reset to default
+                        </Button>
+                      ) : undefined
+                    }
+                  >
+                    <ColorInput
+                      id="widget-accent"
+                      value={form.brandAccent || DEFAULT_WIDGET_ACCENT}
+                      onChange={(hex) => patch("brandAccent", hex)}
+                    />
+                  </Field>
+                  <Field label="Logo URL" hint="Square PNG or SVG. Blank shows the GoChat247 logo.">
+                    <Input
+                      type="url"
+                      value={form.brandLogoUrl}
+                      onChange={(e) => patch("brandLogoUrl", e.target.value)}
+                      placeholder="https://…/logo.png"
+                    />
+                  </Field>
+                </FieldGroup>
+              </FormSection>
+            </TabsContent>
 
-              {/* KB row */}
-              {previewKbKeys.length > 0 && (
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">KB</span>
-                  {previewKbKeys.map((key) => (
-                    <span
-                      key={key}
-                      className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
-                      style={{ borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }}
-                    >
-                      {kbLabel(key)}
-                    </span>
-                  ))}
-                </div>
-              )}
+            {/* Knowledge */}
+            <TabsContent value="knowledge">
+              <FormSection title="Knowledge-base buttons" description="The KB buttons agents can toggle in this account's widget.">
+                <Field
+                  orientation="horizontal"
+                  label="Restrict KB buttons"
+                  htmlFor="widget-kb-override"
+                  hint={
+                    form.kbOverride
+                      ? "Only the selected buttons are shown in the widget."
+                      : `Off: the widget shows every button the account and agent allow${kbCatalog.length ? ` (${kbCatalog.length})` : ""}.`
+                  }
+                >
+                  <Switch
+                    id="widget-kb-override"
+                    checked={form.kbOverride}
+                    disabled={kbCatalog.length === 0}
+                    onCheckedChange={(on) => {
+                      // When first turning the override on, start with everything visible.
+                      patch("kbOverride", on);
+                      if (on && form.kbVisibleKeys.length === 0) {
+                        patch(
+                          "kbVisibleKeys",
+                          kbCatalog.map((q) => q.key),
+                        );
+                      }
+                    }}
+                  />
+                </Field>
 
-              {calcPanelOpen && activePreviewOption ? (
-                /* calculator panel */
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="shrink-0 border-b border-[#94a3b8] px-3.5 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">Installment calculator</p>
-                        <p className="text-[10px] text-slate-500">Approximate values for agents</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewCalcOpen(false)}
-                        className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-[#0057A8] hover:text-[#0057A8]"
-                      >
-                        Back to chat
-                      </button>
-                    </div>
-                    <div className="mt-2.5 flex gap-1">
-                      {enabledTypes.map((key) => {
-                        const active = activePreviewType === key;
+                {kbQuery.isLoading ? (
+                  <div className="flex flex-wrap gap-2" aria-busy="true">
+                    {Array.from({ length: 3 }, (_, i) => (
+                      <Skeleton key={i} className="h-7 w-20 rounded-full" />
+                    ))}
+                  </div>
+                ) : kbCatalog.length === 0 ? (
+                  <Alert
+                    tone="neutral"
+                    description="This account has no knowledge base configured, so there are no KB buttons to manage."
+                  />
+                ) : form.kbOverride ? (
+                  <div className="space-y-2">
+                    <Label id="widget-kb-buttons-label">Visible buttons</Label>
+                    <div role="group" aria-labelledby="widget-kb-buttons-label" className="flex flex-wrap gap-2">
+                      {kbCatalog.map((q: KbQueueGroup) => {
+                        const checked = form.kbVisibleKeys.includes(q.key);
                         return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => setPreviewType(key)}
-                            className="flex-1 rounded-lg border px-2 py-2 text-center text-[11px] font-medium leading-tight"
-                            style={
-                              active
-                                ? { borderColor: accent.base, backgroundColor: accent.soft, color: accent.dark }
-                                : { borderColor: "#cbd5e1", backgroundColor: "#fff", color: "#475569" }
+                          <ToggleChip
+                            key={q.key}
+                            pressed={checked}
+                            onPressedChange={() =>
+                              patch(
+                                "kbVisibleKeys",
+                                checked ? form.kbVisibleKeys.filter((k) => k !== q.key) : [...form.kbVisibleKeys, q.key],
+                              )
                             }
                           >
-                            {productLabel(key)}
-                          </button>
+                            {q.label}
+                          </ToggleChip>
                         );
                       })}
                     </div>
                   </div>
+                ) : null}
+                {form.kbOverride && form.kbVisibleKeys.length === 0 && kbCatalog.length > 0 && (
+                  <Alert tone="warning" description="No buttons selected: the widget will show no KB buttons for this account." />
+                )}
+              </FormSection>
+            </TabsContent>
 
-                  <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-slate-700">Principal (EGP)</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={previewPrincipal}
-                        onChange={(e) => setPreviewPrincipal(e.target.value)}
-                        placeholder="e.g. 10000"
-                        className="w-full rounded-xl border border-slate-400 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#0057A8]"
-                      />
-                    </label>
-                    {principalValue == null && previewPrincipal.trim() !== "" && (
-                      <p className="mt-2 text-xs text-rose-600">Enter a valid amount greater than zero.</p>
-                    )}
-                    {previewRows.length > 0 && (
-                      <div className="mt-3 overflow-hidden rounded-xl border border-[#94a3b8]">
-                        <table className="w-full text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-[#94a3b8] bg-slate-50 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                              <th className="px-2.5 py-2">Months</th>
-                              <th className="px-2.5 py-2 text-right">Installment</th>
-                              <th className="px-2.5 py-2 text-right">Interest</th>
-                              <th className="px-2.5 py-2 text-right">Flat rate</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {previewRows.map((row) => (
-                              <tr
-                                key={row.months}
-                                className="border-b border-slate-100 last:border-b-0 odd:bg-white even:bg-slate-50/60"
-                              >
-                                <td className="px-2.5 py-2 font-medium text-slate-800">{row.months}</td>
-                                <td className="px-2.5 py-2 text-right tabular-nums text-slate-900">
-                                  {egp(row.installment)}
-                                </td>
-                                <td className="px-2.5 py-2 text-right tabular-nums text-slate-700">
-                                  {egp(row.interest)}
-                                </td>
-                                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
-                                  {row.flatPct.toFixed(2)}%
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                    <p className="mt-3 text-[10px] leading-relaxed text-slate-500">
-                      تقريبياً — share amounts as approximate with the customer.
-                    </p>
-                  </div>
-                </div>
-              ) : locPanelOpen ? (
-                /* locations panel */
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="shrink-0 border-b border-[#94a3b8] px-3.5 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">Our locations</p>
-                        <p className="text-[10px] text-slate-500">
-                          {previewLocations.length} branch{previewLocations.length === 1 ? "" : "es"}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewLocOpen(false)}
-                        className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-[#0057A8] hover:text-[#0057A8]"
-                      >
-                        Back to chat
-                      </button>
-                    </div>
-                  </div>
-                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3.5 py-3">
-                    {previewLocations.length === 0 && (
-                      <p className="py-8 text-center text-xs text-slate-500">
-                        No locations added yet.
-                      </p>
-                    )}
-                    {previewLocations.map((loc, i) => (
-                      <div key={i} className="rounded-xl border border-slate-300 bg-white p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <p dir="auto" className="text-sm font-semibold text-slate-900">
-                            {loc.name}
-                          </p>
-                          {loc.area.trim() && (
-                            <span
-                              dir="auto"
-                              className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium"
-                              style={{ borderColor: accent.base, backgroundColor: accent.soft, color: accent.base }}
-                            >
-                              {loc.area}
+            {/* Calculator */}
+            <TabsContent value="calculator">
+              <FormSection title="Installment calculator" description="A loan / installment calculator button in the widget header.">
+                <Field
+                  orientation="horizontal"
+                  label="Show the calculator"
+                  htmlFor="widget-calc-enabled"
+                  hint="Agents open it from the calculator icon in the widget."
+                >
+                  <Switch
+                    id="widget-calc-enabled"
+                    checked={form.calcEnabled}
+                    onCheckedChange={(on) => {
+                      patch("calcEnabled", on);
+                      if (tab === "calculator") setPanel(on ? "calculator" : "chat");
+                    }}
+                  />
+                </Field>
+
+                {form.calcEnabled && (
+                  <div className="space-y-3">
+                    {CALCULATOR_TYPE_OPTIONS.map((opt) => {
+                      const typeKey = opt.key as CalculatorTypeKey;
+                      const on = form.calcTypes.includes(typeKey);
+                      const onlyOne = on && form.calcTypes.length === 1;
+                      const product = form.calcProducts[typeKey];
+                      const checkboxId = `widget-calc-type-${typeKey}`;
+                      return (
+                        <Card key={opt.key} className="p-4">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <Checkbox
+                              id={checkboxId}
+                              checked={on}
+                              disabled={onlyOne}
+                              onCheckedChange={() => {
+                                const next = on ? form.calcTypes.filter((t) => t !== typeKey) : [...form.calcTypes, typeKey];
+                                if (next.length === 0) return; // keep at least one product
+                                patch("calcTypes", next);
+                              }}
+                            />
+                            <Label htmlFor={checkboxId} className="cursor-pointer text-sm">
+                              <span dir="auto">{productLabel(typeKey)}</span>
+                            </Label>
+                            {productLabel(typeKey) !== opt.label && (
+                              <span className="text-xs text-muted-foreground">({opt.label})</span>
+                            )}
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {onlyOne ? "At least one product stays on" : opt.usesApr ? "APR product" : "Flat-rate product"}
                             </span>
+                          </div>
+
+                          {on && (
+                            <div className="mt-4 space-y-4 border-t border-border pt-4">
+                              <FieldGroup columns={2}>
+                                <Field
+                                  label="Display name"
+                                  hint={`Tab name in the widget. Blank uses "${defaultCalculatorLabel(typeKey)}".`}
+                                >
+                                  <Input
+                                    dir="auto"
+                                    value={product.label}
+                                    onChange={(e) => setProduct(typeKey, { ...product, label: e.target.value })}
+                                    placeholder={defaultCalculatorLabel(typeKey)}
+                                  />
+                                </Field>
+                                {opt.usesApr && (
+                                  <Field label="APR (%)" hint="Annual rate, declining balance.">
+                                    <Input
+                                      inputMode="decimal"
+                                      value={product.aprPercent}
+                                      onChange={(e) => setProduct(typeKey, { ...product, aprPercent: e.target.value })}
+                                      placeholder="55"
+                                    />
+                                  </Field>
+                                )}
+                              </FieldGroup>
+
+                              <div className="space-y-2">
+                                <Label id={`${checkboxId}-tenors`}>Tenors (months)</Label>
+                                <div role="group" aria-labelledby={`${checkboxId}-tenors`} className="flex flex-wrap gap-1.5">
+                                  {CALCULATOR_TENOR_OPTIONS.map((month) => {
+                                    const tenorOn = product.tenors.includes(month);
+                                    return (
+                                      <ToggleChip
+                                        key={month}
+                                        pressed={tenorOn}
+                                        aria-label={`${month} months`}
+                                        onPressedChange={() => {
+                                          const nextTenors = tenorOn
+                                            ? product.tenors.filter((t) => t !== month)
+                                            : [...product.tenors, month];
+                                          if (nextTenors.length === 0) return;
+                                          setProduct(typeKey, { ...product, tenors: nextTenors });
+                                        }}
+                                      >
+                                        {month}
+                                      </ToggleChip>
+                                    );
+                                  })}
+                                </div>
+                                <p className="text-xs text-muted-foreground">At least one tenor is required.</p>
+                              </div>
+
+                              {!opt.usesApr && (
+                                <div className="space-y-2">
+                                  <p className="text-ui font-medium text-foreground">Flat rate per month (%)</p>
+                                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    {product.tenors.map((month) => (
+                                      <Field key={month} label={`${month} months`}>
+                                        <Input
+                                          inputMode="decimal"
+                                          controlSize="sm"
+                                          value={product.flatRatePercents[String(month)] ?? ""}
+                                          onChange={(e) =>
+                                            setProduct(typeKey, {
+                                              ...product,
+                                              flatRatePercents: { ...product.flatRatePercents, [String(month)]: e.target.value },
+                                            })
+                                          }
+                                        />
+                                      </Field>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           )}
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </FormSection>
+            </TabsContent>
+
+            {/* Locations */}
+            <TabsContent value="locations">
+              <FormSection title="Locations" description="A branches button in the widget listing this account's addresses.">
+                <Field
+                  orientation="horizontal"
+                  label="Show locations"
+                  htmlFor="widget-loc-enabled"
+                  hint="Agents open the list from the map-pin icon in the widget."
+                >
+                  <Switch
+                    id="widget-loc-enabled"
+                    checked={form.locEnabled}
+                    onCheckedChange={(on) => {
+                      patch("locEnabled", on);
+                      if (tab === "locations") setPanel(on ? "locations" : "chat");
+                    }}
+                  />
+                </Field>
+
+                {form.locEnabled && (
+                  <div className="space-y-3">
+                    {form.locations.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No locations yet. Add the first branch below.</p>
+                    )}
+                    {form.locations.map((loc, i) => (
+                      <Card key={i} className="p-4">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <p className="text-ui font-semibold text-foreground">
+                            Location {i + 1}
+                            {loc.name.trim() && (
+                              <span className="font-normal text-muted-foreground">
+                                {" "}
+                                · <bdi>{loc.name.trim()}</bdi>
+                              </span>
+                            )}
+                          </p>
+                          <IconButton
+                            label={`Remove location ${i + 1}`}
+                            icon={Trash2}
+                            size="sm"
+                            className="hover:text-danger"
+                            onClick={() =>
+                              patch(
+                                "locations",
+                                form.locations.filter((_, idx) => idx !== i),
+                              )
+                            }
+                          />
                         </div>
-                        {loc.address.trim() && (
-                          <p dir="auto" className="mt-1 text-xs leading-relaxed text-slate-600">
-                            {loc.address}
-                          </p>
-                        )}
-                        {(loc.phone.trim() || loc.hours.trim()) && (
-                          <p dir="auto" className="mt-1 text-[11px] text-slate-500">
-                            {[loc.phone.trim(), loc.hours.trim()].filter(Boolean).join(" · ")}
-                          </p>
-                        )}
-                        {loc.mapsUrl.trim() && (
-                          <span
-                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium"
-                            style={{ color: accent.base }}
-                          >
-                            <MapPin className="h-3 w-3" /> Open in Maps
-                          </span>
-                        )}
-                      </div>
+                        <FieldGroup columns={2}>
+                          <Field label="Name" required>
+                            <Input
+                              dir="auto"
+                              value={loc.name}
+                              onChange={(e) => setLocation(i, { ...loc, name: e.target.value })}
+                              placeholder="Main branch"
+                            />
+                          </Field>
+                          <Field label="Area / district">
+                            <Input
+                              dir="auto"
+                              value={loc.area}
+                              onChange={(e) => setLocation(i, { ...loc, area: e.target.value })}
+                              placeholder="Maadi"
+                            />
+                          </Field>
+                          <Field label="Address" className="sm:col-span-2">
+                            <Input
+                              dir="auto"
+                              value={loc.address}
+                              onChange={(e) => setLocation(i, { ...loc, address: e.target.value })}
+                              placeholder="Street, building, nearby landmark…"
+                            />
+                          </Field>
+                          <Field label="Phone / hotline">
+                            <Input
+                              dir="auto"
+                              value={loc.phone}
+                              onChange={(e) => setLocation(i, { ...loc, phone: e.target.value })}
+                              placeholder="16134"
+                            />
+                          </Field>
+                          <Field label="Working hours">
+                            <Input
+                              dir="auto"
+                              value={loc.hours}
+                              onChange={(e) => setLocation(i, { ...loc, hours: e.target.value })}
+                              placeholder="Sat–Thu 9am–5pm"
+                            />
+                          </Field>
+                          <Field label="Google Maps URL" className="sm:col-span-2">
+                            <Input
+                              type="url"
+                              value={loc.mapsUrl}
+                              onChange={(e) => setLocation(i, { ...loc, mapsUrl: e.target.value })}
+                              placeholder="https://maps.google.com/…"
+                            />
+                          </Field>
+                        </FieldGroup>
+                      </Card>
                     ))}
-                    {previewLocations.some((l) => l.phone.trim()) && (
-                      <p className="pt-1 text-center text-[10px] text-slate-500">
-                        <Phone className="mr-1 inline h-3 w-3" />
-                        Call the hotline to find your nearest branch.
-                      </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => patch("locations", [...form.locations, { ...EMPTY_LOCATION }])}
+                    >
+                      <Plus aria-hidden="true" className="h-4 w-4" />
+                      Add location
+                    </Button>
+                    {form.locations.length > 0 && form.locations.every((l) => !l.name.trim()) && (
+                      <Alert tone="warning" description="Locations need at least a name to be saved and shown." />
                     )}
                   </div>
-                </div>
-              ) : (
-                /* chat empty state */
-                <>
-                  <div className="min-h-0 flex-1 overflow-y-auto bg-white px-3.5 py-3">
-                    <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
-                      <div className="mb-3 flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border-2 border-[#94a3b8] bg-white p-1.5 shadow-sm">
-                        <img
-                          src={previewLogo || "/GoChat247_blue_transparent.png"}
-                          alt=""
-                          className="h-full w-full object-contain"
-                        />
-                      </div>
-                      <p className="text-sm font-medium text-slate-800">How can I help?</p>
-                      <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-600">
-                        Ask a question about your knowledge base or start a new topic.
-                      </p>
-                    </div>
-                  </div>
+                )}
+              </FormSection>
+            </TabsContent>
+          </Tabs>
 
-                  {/* input */}
-                  <div className="shrink-0 border-t border-[#94a3b8] bg-white px-3 pb-3 pt-2.5">
-                    <div className="flex items-end gap-2 rounded-2xl border border-slate-400 bg-white p-1.5 shadow-sm">
-                      <span className="flex-1 px-2.5 py-2 text-sm text-slate-400">Ask anything…</span>
-                      <span
-                        className="mb-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-white"
-                        style={{ borderColor: accent.dark, backgroundColor: accent.base }}
-                      >
-                        <SendHorizontal className="h-4 w-4" />
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-center text-[10px] text-slate-500">
-                      Enter to send · Shift+Enter for new line
-                    </p>
-                  </div>
-                </>
+          {/* Save bar: stays at the bottom of the scroll area while the form is longer than the screen. */}
+          <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-md">
+            <div aria-live="polite" className="min-w-0">
+              {dirty ? (
+                <Status tone="warning" label="Unsaved changes" />
+              ) : (
+                <span className="text-ui text-muted-foreground">No unsaved changes</span>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Preview of the real widget. {form.calcEnabled ? "Click the calculator icon to preview it. " : ""}
-              Changes apply after you save.
-            </p>
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setForm(baseline);
+                    setError(null);
+                  }}
+                  disabled={updateAccount.isPending}
+                >
+                  Discard
+                </Button>
+              )}
+              <Button onClick={handleSave} loading={updateAccount.isPending}>
+                {updateAccount.isPending ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
           </div>
         </div>
-      )}
-    </div>
+
+        {/* ---------------- Live preview (mirrors the real widget) ---------------- */}
+        <aside aria-labelledby="widget-preview-heading" className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+          <div className="mb-2 flex items-baseline justify-between gap-2">
+            <h2 id="widget-preview-heading" className="text-sm font-semibold text-foreground">
+              Live preview
+            </h2>
+            <span className="text-xs text-muted-foreground">Desktop widget</span>
+          </div>
+          <WidgetPreview
+            key={account.id}
+            className="mx-auto"
+            accountName={account.name}
+            title={form.brandTitle}
+            subtitle={form.brandSubtitle}
+            accentColor={form.brandAccent}
+            logoUrl={form.brandLogoUrl}
+            kbButtons={previewKbKeys.map((key) => ({ key, label: kbLabel(key) }))}
+            calculator={{ enabled: form.calcEnabled, types: form.calcTypes, products: form.calcProducts }}
+            locations={{ enabled: form.locEnabled, items: form.locations }}
+            panel={panel}
+            onPanelChange={setPanel}
+          />
+          <p className="mx-auto mt-2 max-w-[360px] text-xs text-muted-foreground">
+            Shows unsaved changes. Use the header buttons to open the calculator or locations. Agents see changes after you save.
+          </p>
+        </aside>
+      </div>
+    </Page>
   );
 }

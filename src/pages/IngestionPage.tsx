@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
-import { Eye, Plus, Upload } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Eye, Inbox, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
@@ -11,41 +13,72 @@ import {
   useCreateIngestionRequest,
   useUpdateIngestionRequest,
 } from "@/hooks/useIngestion";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { StatusBadge } from "@/components/shared/StatusBadge";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Status, humanizeStatus } from "@/components/data/status";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { filterRows } from "@/lib/table-filters";
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FormSection } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/toast";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
 import type { DeveloperNotify, IngestionRequest } from "@/types/api";
 
-const INGESTION_STATUS_OPTIONS = [
-  "PENDING",
-  "IN_PROGRESS",
-  "COMPLETED",
-  "FAILED",
-  "CANCELLED",
-] as const;
+const INGESTION_STATUS_OPTIONS = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"] as const;
+
+/** Status summary chips (they also filter the table). */
+const STATUS_TABS: { value: string; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "PENDING", label: "Pending" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "FAILED", label: "Failed" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
 
 const KB_DESCRIPTION_PLACEHOLDER =
   "Example: Product FAQs, onboarding guides, and policy documents for the Halan mobile app. " +
   "Include common customer issues, refund rules, and troubleshooting steps you want in the knowledge base.";
 
-function requesterName(
-  first: string | null | undefined,
-  last: string | null | undefined,
-  email: string,
-): string {
+function requesterName(first: string | null | undefined, last: string | null | undefined, email: string): string {
   const name = [first, last].filter(Boolean).join(" ").trim();
   return name || email;
 }
 
+function PriorityBadge({ value }: { value: string | null | undefined }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  const v = value.toUpperCase();
+  return <Badge variant={v === "HIGH" || v === "URGENT" ? "warning" : "neutral"}>{humanizeStatus(v)}</Badge>;
+}
+
+function Fact({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 break-words text-ui text-foreground">{children}</dd>
+    </div>
+  );
+}
+
 export function IngestionPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const isDeveloper = user?.roles.includes(ROLES.DEVELOPER);
   const canManageIngestion = isSuperAdmin || isDeveloper;
@@ -55,7 +88,7 @@ export function IngestionPage() {
   const pendingCount = pendingBadge?.pending_count ?? 0;
   const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);
   const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const { data = [], isLoading } = useIngestionRequests();
+  const { data = [], isLoading, isError, error: loadError, refetch } = useIngestionRequests();
   const createRequest = useCreateIngestionRequest();
   const updateRequest = useUpdateIngestionRequest();
 
@@ -64,7 +97,7 @@ export function IngestionPage() {
   const [viewing, setViewing] = useState<IngestionRequest | null>(null);
   const [viewStatus, setViewStatus] = useState("PENDING");
   const [viewError, setViewError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
   const [accountFilter, setAccountFilter] = useState("ALL");
@@ -76,14 +109,12 @@ export function IngestionPage() {
     requester_phone: "",
   });
   const [error, setError] = useState<string | null>(null);
-  const [emailNotify, setEmailNotify] = useState<DeveloperNotify | null>(null);
 
-  const organizationNameById = useMemo(
-    () => new Map(organizations.map((o) => [o.id, o.name])),
-    [organizations],
-  );
+  const organizationNameById = useMemo(() => new Map(organizations.map((o) => [o.id, o.name])), [organizations]);
+  const orgName = (r: IngestionRequest) => r.organization_name ?? organizationNameById.get(r.organization_id ?? -1) ?? "—";
 
-  const filteredData = useMemo(
+  // Everything except the status filter: the status chips count within this scope.
+  const scopedData = useMemo(
     () =>
       filterRows(
         data,
@@ -100,13 +131,21 @@ export function IngestionPage() {
             r.description ?? "",
           ].join(" "),
         [
-          (r) => statusFilter === "ALL" || r.status === statusFilter,
           (r) => orgFilter === "ALL" || String(r.organization_id) === orgFilter,
           (r) => accountFilter === "ALL" || String(r.account_id) === accountFilter,
         ],
       ),
-    [data, search, statusFilter, orgFilter, accountFilter, organizationNameById],
+    [data, search, orgFilter, accountFilter, organizationNameById],
   );
+  const filteredData = useMemo(
+    () => scopedData.filter((r) => statusFilter === "ALL" || r.status === statusFilter),
+    [scopedData, statusFilter],
+  );
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: scopedData.length };
+    for (const r of scopedData) counts[r.status ?? ""] = (counts[r.status ?? ""] ?? 0) + 1;
+    return counts;
+  }, [scopedData]);
 
   const filterAccounts = useMemo(() => {
     if (!isSuperAdmin || orgFilter === "ALL") return accounts;
@@ -115,14 +154,8 @@ export function IngestionPage() {
 
   function openCreate() {
     setSubmittedAt(new Date().toLocaleString());
-    setForm({
-      account_id: "",
-      request_type: "DOCUMENT",
-      description: "",
-      requester_phone: "",
-    });
+    setForm({ account_id: "", request_type: "DOCUMENT", description: "", requester_phone: "" });
     setError(null);
-    setEmailNotify(null);
     setDialogOpen(true);
   }
 
@@ -144,21 +177,24 @@ export function IngestionPage() {
     if (!viewing) return;
     setViewError(null);
     try {
-      const updated = await updateRequest.mutateAsync({
-        id: viewing.id,
-        body: { status: viewStatus },
-      });
+      const updated = await updateRequest.mutateAsync({ id: viewing.id, body: { status: viewStatus } });
       setViewing(updated);
       setViewOpen(false);
+      toast.success(`Request #${viewing.id} updated`, { description: `Status: ${humanizeStatus(viewStatus)}` });
     } catch (e) {
       setViewError(formatUserError(e));
     }
   }
 
-  function formatCreatedAt(value: string | null | undefined): string {
-    if (!value) return "—";
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+  function notifyToast(notify: DeveloperNotify | null | undefined) {
+    if (!notify) {
+      toast.success("Ingestion request created");
+      return;
+    }
+    if (notify.status === "sent") toast.success("Ingestion request created", { description: `Developer email sent. ${notify.message}` });
+    else if (notify.status === "failed")
+      toast.warning("Request created, developer email not sent", { description: notify.message });
+    else toast.info("Request created, developer email skipped", { description: notify.message });
   }
 
   async function handleCreate() {
@@ -178,473 +214,357 @@ export function IngestionPage() {
         description: form.description.trim(),
         requester_phone: form.requester_phone.trim(),
       });
-      setEmailNotify(created.developer_notify);
+      notifyToast(created.developer_notify);
+      setDialogOpen(false);
     } catch (e) {
       setError(formatUserError(e));
     }
   }
 
-  const displayName = user
-    ? requesterName(user.first_name, user.last_name, user.email)
-    : "";
+  const displayName = user ? requesterName(user.first_name, user.last_name, user.email) : "";
 
-  const stickyActionHead =
-    "sticky right-0 z-10 w-12 min-w-[3rem] bg-slate-50/80 text-center normal-case tracking-normal";
-  const stickyActionCell =
-    "sticky right-0 z-10 w-12 min-w-[3rem] bg-white text-center shadow-[-6px_0_10px_-6px_rgba(0,0,0,0.08)] group-hover:bg-slate-50";
+  const columns: Column<IngestionRequest>[] = [
+    { key: "id", header: "ID", sortable: true, render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
+    {
+      key: "account_name",
+      header: "Account",
+      sortable: true,
+      truncate: true,
+      maxWidth: "11rem",
+      render: (r) => <bdi>{r.account_name ?? `#${r.account_id}`}</bdi>,
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            key: "organization_name",
+            header: "Organization",
+            sortable: true,
+            sortValue: (r: IngestionRequest) => orgName(r),
+            truncate: true,
+            maxWidth: "11rem",
+            render: (r: IngestionRequest) => <bdi>{orgName(r)}</bdi>,
+          } satisfies Column<IngestionRequest>,
+        ]
+      : []),
+    { key: "request_type", header: "Type", render: (r) => r.request_type ?? "—" },
+    {
+      key: "requester_name",
+      header: "Requester",
+      render: (r) => (
+        <div className="min-w-0 max-w-[15rem]">
+          <p className="truncate text-foreground">
+            <bdi>{r.requester_name ?? "—"}</bdi>
+          </p>
+          {!isSuperAdmin && (r.requester_email || r.requester_phone) && (
+            <p className="truncate text-xs text-muted-foreground">
+              {r.requester_email && (
+                <a href={`mailto:${r.requester_email}`} className="text-primary hover:underline">
+                  {r.requester_email}
+                </a>
+              )}
+              {r.requester_email && r.requester_phone ? " · " : ""}
+              {r.requester_phone && <span className="tabular-nums">{r.requester_phone}</span>}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      render: (r) => <Status value={r.status} />,
+    },
+    { key: "priority", header: "Priority", render: (r) => <PriorityBadge value={r.priority} /> },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      sortValue: (r) => r.created_at ?? "",
+      render: (r) => <RelativeTime value={r.created_at} />,
+    },
+    {
+      key: "description",
+      header: "KB description",
+      truncate: true,
+      maxWidth: "18rem",
+      defaultHidden: true,
+      cellTitle: (r) => r.description ?? undefined,
+      render: (r) => <span dir="auto" className="text-muted-foreground">{(r.description ?? "").trim() || "—"}</span>,
+    },
+  ];
+  if (canManageIngestion) {
+    columns.push(
+      actionsColumn<IngestionRequest>((r) => [{ label: "View request", icon: Eye, onSelect: () => openView(r) }], {
+        label: (r) => `Actions for request #${r.id}`,
+      }),
+    );
+  }
 
-  const columns = useMemo(() => {
-    if (isSuperAdmin) {
-      return [
-        { key: "id", header: "ID", sortable: true, className: "whitespace-nowrap w-14" },
-        {
-          key: "organization_name",
-          header: "Organization",
-          sortable: true,
-          className: "min-w-[7rem] max-w-[10rem]",
-          cellClassName: "min-w-[7rem] max-w-[10rem] truncate",
-          render: (r) =>
-            r.organization_name ?? organizationNameById.get(r.organization_id ?? -1) ?? "—",
-        },
-        {
-          key: "account_name",
-          header: "Account",
-          sortable: true,
-          className: "min-w-[6rem] max-w-[9rem]",
-          cellClassName: "min-w-[6rem] max-w-[9rem] truncate",
-          render: (r) => r.account_name ?? `#${r.account_id}`,
-        },
-        {
-          key: "requester_name",
-          header: "Requester",
-          className: "min-w-[6rem] max-w-[9rem]",
-          cellClassName: "min-w-[6rem] max-w-[9rem] truncate",
-          render: (r) => r.requester_name ?? "—",
-        },
-        {
-          key: "created_at",
-          header: "Date & time",
-          sortable: true,
-          sortValue: (r) => r.created_at ?? "",
-          className: "whitespace-nowrap min-w-[9rem]",
-          render: (r) => formatCreatedAt(r.created_at),
-        },
-        {
-          key: "status",
-          header: "Status",
-          className: "whitespace-nowrap",
-          render: (r) => <StatusBadge status={r.status} />,
-        },
-        {
-          key: "description",
-          header: "KB description",
-          className: "min-w-[8rem] max-w-[14rem]",
-          cellClassName: "min-w-[8rem] max-w-[14rem] truncate text-muted-foreground",
-          render: (r) => (
-            <span title={r.description ?? undefined}>{(r.description ?? "").trim() || "—"}</span>
-          ),
-        },
-        {
-          key: "actions",
-          header: "View",
-          headClassName: stickyActionHead,
-          cellClassName: stickyActionCell,
-          render: (r) => (
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              title="View request"
-              aria-label="View request"
-              onClick={(e) => {
-                e.stopPropagation();
-                openView(r);
-              }}
-            >
-              <Eye className="h-4 w-4" />
-            </Button>
-          ),
-        },
-      ] satisfies Parameters<typeof DataTable<IngestionRequest>>[0]["columns"];
-    }
-
-    const cols: Parameters<typeof DataTable<IngestionRequest>>[0]["columns"] = [
-      { key: "id", header: "ID", sortable: true },
-      {
-        key: "account_name",
-        header: "Account",
-        sortable: true,
-        render: (r) => r.account_name ?? `#${r.account_id}`,
-      },
-      {
-        key: "requester_name",
-        header: "Requester",
-        render: (r) => r.requester_name ?? "—",
-      },
-      {
-        key: "requester_email",
-        header: "Email",
-        render: (r) =>
-          r.requester_email ? (
-            <a href={`mailto:${r.requester_email}`} className="text-[#004080] hover:underline">
-              {r.requester_email}
-            </a>
-          ) : (
-            "—"
-          ),
-      },
-      {
-        key: "requester_phone",
-        header: "Phone",
-        className: "whitespace-nowrap",
-        render: (r) => r.requester_phone ?? "—",
-      },
-      { key: "request_type", header: "Type", render: (r) => r.request_type ?? "—" },
-      {
-        key: "created_at",
-        header: "Date & time",
-        sortable: true,
-        sortValue: (r) => r.created_at ?? "",
-        className: "whitespace-nowrap",
-        render: (r) => formatCreatedAt(r.created_at),
-      },
-      { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-      {
-        key: "description",
-        header: "KB description",
-        className: "max-w-xs",
-        cellClassName: "max-w-xs truncate",
-        render: (r) => (
-          <span title={r.description ?? undefined}>{(r.description ?? "").slice(0, 60) || "—"}</span>
-        ),
-      },
-    ];
-
-    if (canManageIngestion) {
-      cols.push({
-        key: "actions",
-        header: "View",
-        headClassName: stickyActionHead,
-        cellClassName: stickyActionCell,
-        render: (r) => (
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            title="View request"
-            aria-label="View request"
-            onClick={(e) => {
-              e.stopPropagation();
-              openView(r);
-            }}
-          >
-            <Eye className="h-4 w-4" />
-          </Button>
-        ),
-      });
-    }
-
-    return cols satisfies Parameters<typeof DataTable<IngestionRequest>>[0]["columns"];
-  }, [isSuperAdmin, canManageIngestion, organizationNameById]);
+  const isFiltered = search.trim() !== "" || statusFilter !== "ALL" || orgFilter !== "ALL" || accountFilter !== "ALL";
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={Upload}
+    <Page width="wide">
+      <PageHeading
         title="Ingestion"
+        meta={isSuperAdmin && pendingCount > 0 ? <Badge variant="warning">{formatNumber(pendingCount)} pending</Badge> : undefined}
         description={
           isSuperAdmin && pendingCount > 0
-            ? `${pendingCount} pending ingestion request${pendingCount === 1 ? "" : "s"} — contact requesters using email or phone`
+            ? "Pending knowledge-base requests across all organizations: contact requesters by email or phone."
             : isSuperAdmin
-              ? "Review ingestion requests across all organizations and contact requesters"
+              ? "Review ingestion requests across all organizations and contact requesters."
               : isDeveloper
-                ? "Review and update ingestion requests for your organization"
-                : "Knowledge base ingestion requests"
+                ? "Review and update ingestion requests for your organization."
+                : "Knowledge base ingestion requests."
         }
         actions={
           canCreateRequest ? (
             <Button onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> New Request
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              New request
             </Button>
           ) : undefined
         }
       />
 
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder={
-          isSuperAdmin
-            ? "Search by requester, email, phone, account, organization, or description…"
-            : "Search by requester, email, phone, account, or description…"
-        }
-        filters={[
-          ...(isSuperAdmin
-            ? [
-                {
-                  id: "ingestion-org-filter",
-                  label: "Organization",
-                  value: orgFilter,
-                  onChange: setOrgFilter,
-                  options: [
-                    { value: "ALL", label: "All organizations" },
-                    ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
-                  ],
-                },
-              ]
-            : []),
-          {
-            id: "ingestion-status-filter",
-            label: "Status",
-            value: statusFilter,
-            onChange: setStatusFilter,
-            options: [
-              { value: "ALL", label: "All statuses" },
-              { value: "PENDING", label: "Pending" },
-              { value: "IN_PROGRESS", label: "In progress" },
-              { value: "COMPLETED", label: "Completed" },
-              { value: "FAILED", label: "Failed" },
-              { value: "CANCELLED", label: "Cancelled" },
-            ],
-          },
-          {
-            id: "ingestion-account-filter",
-            label: "Account",
-            value: accountFilter,
-            onChange: setAccountFilter,
-            options: [
-              { value: "ALL", label: "All accounts" },
-              ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name })),
-            ],
-          },
-        ]}
-        onClear={clearFilters}
-        totalCount={data.length}
-        filteredCount={filteredData.length}
-      />
+      <Tabs variant="segmented" value={statusFilter} onValueChange={setStatusFilter}>
+        <TabsList aria-label="Filter by status">
+          {STATUS_TABS.map((t) => (
+            <TabsTrigger key={t.value} value={t.value} count={isLoading ? undefined : formatNumber(statusCounts[t.value] ?? 0)}>
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       <DataTable<IngestionRequest>
+        aria-label="Ingestion requests"
         columns={columns}
-        data={filteredData}
+        data={isError ? [] : filteredData}
         keyFn={(r) => r.id}
         loading={isLoading}
+        itemLabel="requests"
+        defaultSort={{ key: "created_at", dir: "desc" }}
+        enableColumnVisibility
+        persistKey="ingestion"
+        onRowClick={canManageIngestion ? (r) => openView(r) : undefined}
+        empty={
+          isError
+            ? {
+                title: "Couldn't load ingestion requests",
+                description: formatUserError(loadError),
+                action: (
+                  <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                    Try again
+                  </Button>
+                ),
+              }
+            : isFiltered
+              ? {
+                  title: "No requests match these filters",
+                  action: (
+                    <Button variant="outline" size="sm" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ),
+                }
+              : { icon: Inbox, title: "No ingestion requests yet", description: canCreateRequest ? "Use New request to ask for knowledge-base content." : undefined }
+        }
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder={isSuperAdmin ? "Search requester, account, organization, description…" : "Search requester, account, description…"}
+            filters={[
+              {
+                id: "ingestion-org-filter",
+                label: "Organization",
+                value: orgFilter,
+                onChange: setOrgFilter,
+                hidden: !isSuperAdmin,
+                options: [{ value: "ALL", label: "All" }, ...organizations.map((o) => ({ value: String(o.id), label: o.name }))],
+              },
+              {
+                id: "ingestion-account-filter",
+                label: "Account",
+                value: accountFilter,
+                onChange: setAccountFilter,
+                options: [{ value: "ALL", label: "All" }, ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name }))],
+              },
+            ]}
+            onClear={clearFilters}
+            isFiltered={isFiltered}
+            totalCount={isFiltered ? data.length : undefined}
+            filteredCount={filteredData.length}
+            itemLabel="requests"
+          />
+        }
       />
 
       {canManageIngestion && (
-        <Dialog open={viewOpen} onOpenChange={setViewOpen} size="max-w-2xl">
-          <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col overflow-hidden p-0">
-            <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
-              <DialogTitle>
-                Ingestion request #{viewing?.id ?? ""}
-              </DialogTitle>
-            </DialogHeader>
-            <DialogBody className="min-h-0 flex-1 px-6 py-4">
-            {viewing && (
-              <div className="space-y-4 text-sm">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Organization</p>
-                    <p className="mt-0.5 font-medium">
-                      {viewing.organization_name
-                        ?? organizationNameById.get(viewing.organization_id ?? -1)
-                        ?? "—"}
-                    </p>
+        <Sheet open={viewOpen} onOpenChange={setViewOpen}>
+          <SheetContent size="md">
+            <SheetHeader>
+              <SheetTitle>
+                Ingestion request <span className="font-mono">#{viewing?.id ?? ""}</span>
+              </SheetTitle>
+              <SheetDescription>Contact the requester, then record the progress here.</SheetDescription>
+            </SheetHeader>
+            <SheetBody className="space-y-5">
+              {viewing && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Status value={viewing.status} />
+                    <PriorityBadge value={viewing.priority} />
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Account</p>
-                    <p className="mt-0.5 font-medium">{viewing.account_name ?? `#${viewing.account_id}`}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Requester</p>
-                    <p className="mt-0.5">{viewing.requester_name ?? "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Submitted</p>
-                    <p className="mt-0.5">{formatCreatedAt(viewing.created_at)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Email</p>
-                    <p className="mt-0.5">
+                  <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <Fact label="Organization">
+                      <bdi>{orgName(viewing)}</bdi>
+                    </Fact>
+                    <Fact label="Account">
+                      <bdi>{viewing.account_name ?? `#${viewing.account_id}`}</bdi>
+                    </Fact>
+                    <Fact label="Requester">
+                      <bdi>{viewing.requester_name ?? "—"}</bdi>
+                    </Fact>
+                    <Fact label="Submitted">{formatDateTime(viewing.created_at)}</Fact>
+                    <Fact label="Email">
                       {viewing.requester_email ? (
-                        <a href={`mailto:${viewing.requester_email}`} className="text-[#004080] hover:underline">
+                        <a href={`mailto:${viewing.requester_email}`} className="text-primary hover:underline">
                           {viewing.requester_email}
                         </a>
                       ) : (
                         "—"
                       )}
+                    </Fact>
+                    <Fact label="Phone">
+                      {viewing.requester_phone ? (
+                        <a href={`tel:${viewing.requester_phone.replace(/\s+/g, "")}`} className="tabular-nums text-primary hover:underline">
+                          {viewing.requester_phone}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </Fact>
+                    <Fact label="Request type">{viewing.request_type ?? "—"}</Fact>
+                  </dl>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">Knowledge base description</p>
+                    <p dir="auto" className="whitespace-pre-wrap break-words rounded-md border border-border bg-surface-muted px-3 py-2 text-ui text-foreground">
+                      {viewing.description?.trim() || "—"}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Phone</p>
-                    <p className="mt-0.5">{viewing.requester_phone ?? "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground">Request type</p>
-                    <p className="mt-0.5">{viewing.request_type ?? "—"}</p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Knowledge base description</p>
-                  <p className="mt-1 whitespace-pre-wrap rounded-md border border-input bg-muted/20 px-3 py-2">
-                    {viewing.description?.trim() || "—"}
-                  </p>
-                </div>
-
-                <div>
-                  <Label>Status</Label>
-                  <Select
-                    value={viewStatus}
-                    onChange={(e) => setViewStatus(e.target.value)}
-                    className="mt-1"
-                  >
-                    {INGESTION_STATUS_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
-                    ))}
-                  </Select>
-                </div>
-
-                {viewError && <p className="text-sm text-red-600">{viewError}</p>}
-              </div>
-            )}
-            </DialogBody>
-            <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
-              <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
-              <Button
-                onClick={handleSaveStatus}
-                disabled={updateRequest.isPending || viewStatus === (viewing?.status ?? "")}
-              >
+                  <Field label="Status" htmlFor="ingestion-view-status" className="border-t border-border pt-4">
+                    <Select id="ingestion-view-status" value={viewStatus} onChange={(e) => setViewStatus(e.target.value)}>
+                      {INGESTION_STATUS_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {humanizeStatus(s)}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <ErrorAlert message={viewError} />
+                </>
+              )}
+            </SheetBody>
+            <SheetFooter>
+              <Button variant="outline" onClick={() => setViewOpen(false)}>
+                Close
+              </Button>
+              <Button onClick={handleSaveStatus} disabled={viewStatus === (viewing?.status ?? "")} loading={updateRequest.isPending}>
                 Save status
+              </Button>
+            </SheetFooter>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {canCreateRequest && (
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="lg">
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New ingestion request</DialogTitle>
+              <DialogDescription>Ask for content to be added to an account's knowledge base. A developer is notified by email.</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-6">
+              <ErrorAlert message={error} />
+              <FormSection title="Request">
+                <FieldGroup columns={2}>
+                  <Field label="Account" htmlFor="ingestion-account">
+                    <Select
+                      id="ingestion-account"
+                      value={form.account_id}
+                      onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                    >
+                      <option value="">Select account</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                          {isSuperAdmin ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Request type" htmlFor="ingestion-type">
+                    <Input
+                      id="ingestion-type"
+                      value={form.request_type}
+                      onChange={(e) => setForm({ ...form, request_type: e.target.value })}
+                    />
+                  </Field>
+                </FieldGroup>
+                <Field
+                  label="Knowledge base description"
+                  htmlFor="ingestion-description"
+                  required
+                  hint="Tell the supervisor what this KB is about and what content should be included."
+                >
+                  <Textarea
+                    id="ingestion-description"
+                    dir="auto"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    placeholder={KB_DESCRIPTION_PLACEHOLDER}
+                    rows={4}
+                  />
+                </Field>
+              </FormSection>
+
+              <FormSection title="Your contact details" description="Supervisors use this to reach you about the request.">
+                <FieldGroup columns={2}>
+                  <Field label="Name" htmlFor="ingestion-name">
+                    <Input id="ingestion-name" value={displayName} readOnly />
+                  </Field>
+                  <Field label="Email" htmlFor="ingestion-email">
+                    <Input id="ingestion-email" value={user?.email ?? ""} readOnly />
+                  </Field>
+                  <Field label="Phone" htmlFor="ingestion-phone" required>
+                    <Input
+                      id="ingestion-phone"
+                      type="tel"
+                      value={form.requester_phone}
+                      onChange={(e) => setForm({ ...form, requester_phone: e.target.value })}
+                      placeholder="+20 1xx xxx xxxx"
+                    />
+                  </Field>
+                  <Field label="Date & time" htmlFor="ingestion-date" hint="Set automatically when you submit.">
+                    <Input id="ingestion-date" value={submittedAt} readOnly />
+                  </Field>
+                </FieldGroup>
+              </FormSection>
+
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreate} loading={createRequest.isPending}>
+                {createRequest.isPending ? "Creating…" : "Create request"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
-
-      {canCreateRequest && (
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="max-w-2xl">
-          <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col overflow-hidden p-0">
-            <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
-              <DialogTitle>New Ingestion Request</DialogTitle>
-            </DialogHeader>
-            <DialogBody className="min-h-0 flex-1 px-6 py-4">
-            <div className="space-y-4">
-              <div>
-                <Label>Account</Label>
-                <Select
-                  value={form.account_id}
-                  onChange={(e) => setForm({ ...form, account_id: e.target.value })}
-                  className="mt-1"
-                >
-                  <option value="">Select account</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}{isSuperAdmin ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                <p className="text-sm font-medium">Your contact details</p>
-                <p className="text-xs text-muted-foreground">
-                  Supervisors use this to reach you about the request.
-                </p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label>Name</Label>
-                    <Input value={displayName} readOnly className="mt-1 bg-background" />
-                  </div>
-                  <div>
-                    <Label>Email</Label>
-                    <Input value={user?.email ?? ""} readOnly className="mt-1 bg-background" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Label>Phone</Label>
-                    <Input
-                      value={form.requester_phone}
-                      onChange={(e) => setForm({ ...form, requester_phone: e.target.value })}
-                      placeholder="+20 1xx xxx xxxx"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Request Type</Label>
-                  <Input
-                    value={form.request_type}
-                    onChange={(e) => setForm({ ...form, request_type: e.target.value })}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label>Date & time</Label>
-                  <Input value={submittedAt} readOnly className="mt-1 bg-background" />
-                  <p className="mt-1 text-xs text-muted-foreground">Set automatically when you submit.</p>
-                </div>
-              </div>
-              <div>
-                <Label>Knowledge base description</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Tell the supervisor what this KB is about and what content should be included.
-                </p>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder={KB_DESCRIPTION_PLACEHOLDER}
-                  rows={3}
-                  className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-              </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              {emailNotify && (
-                <div
-                  className={
-                    emailNotify.status === "sent"
-                      ? "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
-                      : emailNotify.status === "disabled" || emailNotify.status === "no_recipients"
-                        ? "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                        : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-                  }
-                  role="status"
-                >
-                  <p className="font-medium">
-                    {emailNotify.status === "sent"
-                      ? "Developer email sent"
-                      : emailNotify.status === "failed"
-                        ? "Developer email not sent"
-                        : "Developer email skipped"}
-                  </p>
-                  <p className="mt-1">{emailNotify.message}</p>
-                </div>
-              )}
-            </div>
-            </DialogBody>
-            <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
-              {emailNotify ? (
-                <Button
-                  onClick={() => {
-                    setEmailNotify(null);
-                    setDialogOpen(false);
-                  }}
-                >
-                  Close
-                </Button>
-              ) : (
-                <>
-                  <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                  <Button onClick={handleCreate} disabled={createRequest.isPending}>
-                    {createRequest.isPending ? "Creating…" : "Create"}
-                  </Button>
-                </>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
+    </Page>
   );
 }
