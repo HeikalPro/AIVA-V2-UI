@@ -1,6 +1,14 @@
-import { Cpu, Database, MessageSquare, Server, type LucideIcon } from "lucide-react";
+import { Cpu, Database, MessageSquare, Server, ShieldCheck, type LucideIcon } from "lucide-react";
+import { formatDurationMs } from "@/lib/format";
 import { useSystemComponents } from "@/hooks/useSystemHealth";
+import { DataTable, type Column } from "@/components/data/data-table";
+import { Status, type StatusTone } from "@/components/data/status";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
+import { AutoRefreshIndicator } from "./AutoRefreshIndicator";
 import type { ComponentHealth } from "@/types/api";
+
+/** Display only: mirrors COMPONENTS_REFETCH_MS in hooks/useSystemHealth. */
+const COMPONENTS_REFRESH_MS = 15_000;
 
 const ICONS: Record<string, LucideIcon> = {
   database: Database,
@@ -9,91 +17,101 @@ const ICONS: Record<string, LucideIcon> = {
   chatbot: MessageSquare,
 };
 
-type Tone = "good" | "warn" | "critical" | "neutral";
-
-function tone(status: string): Tone {
-  switch (status) {
-    case "up":
-      return "good";
-    case "degraded":
-      return "warn";
-    case "down":
-      return "critical";
-    default:
-      return "neutral";
-  }
-}
-
-const STATUS_TEXT: Record<Tone, string> = {
-  good: "text-emerald-600",
-  warn: "text-amber-600",
-  critical: "text-red-600",
-  neutral: "text-slate-500",
-};
-const DOT: Record<Tone, string> = {
-  good: "bg-emerald-500",
-  warn: "bg-amber-500",
-  critical: "bg-red-500",
-  neutral: "bg-slate-400",
+const STATUS: Record<string, { tone: StatusTone; label: string }> = {
+  up: { tone: "success", label: "Operational" },
+  degraded: { tone: "warning", label: "Degraded" },
+  down: { tone: "danger", label: "Down" },
+  not_configured: { tone: "neutral", label: "Not configured" },
+  unknown: { tone: "neutral", label: "Unknown" },
 };
 
-function statusLabel(status: string): string {
-  if (status === "up") return "OK";
-  if (status === "not_configured") return "Not configured";
-  return status.toUpperCase();
+const STATUS_ORDER: Record<string, number> = { down: 0, degraded: 1, up: 2, not_configured: 3, unknown: 4 };
+
+function componentStatus(status: string) {
+  return STATUS[status] ?? { tone: "neutral" as StatusTone, label: status ? status.charAt(0).toUpperCase() + status.slice(1) : "—" };
 }
 
-function ComponentCard({ c, when }: { c: ComponentHealth; when: string }) {
-  const t = tone(c.status);
-  const Icon = ICONS[c.key] ?? Server;
-  return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-          <Icon className="h-4 w-4" />
-        </div>
-        <span className={`h-2 w-2 rounded-full ${DOT[t]}`} title={c.status} />
-      </div>
-      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{c.label}</p>
-      <p className={`text-xl font-bold ${STATUS_TEXT[t]}`}>{statusLabel(c.status)}</p>
-      {c.latency_ms != null ? <p className="text-xs text-muted-foreground">{c.latency_ms} ms</p> : null}
-      {c.info ? (
-        <p className="mt-1 max-w-full truncate text-xs text-muted-foreground" title={c.info}>
-          {c.info}
-        </p>
-      ) : null}
-      {c.detail ? (
-        <p className="mt-1 max-w-full truncate text-xs text-red-500" title={c.detail}>
-          {c.detail}
-        </p>
-      ) : null}
-      <p className="mt-1 text-xs text-muted-foreground">{when}</p>
-    </div>
-  );
-}
-
+/** Backend dependencies (database, LLM gateway, Redis, chatbot) with live status and latency. */
 export function SystemComponentsSection() {
-  const { data, isLoading } = useSystemComponents();
+  const { data, isLoading, isFetching } = useSystemComponents();
 
-  if (isLoading && !data) {
-    return (
-      <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-        Checking components…
-      </div>
-    );
-  }
-  if (!data) return null;
-
-  const when = new Date(data.generated_at).toLocaleTimeString();
+  const columns: Column<ComponentHealth>[] = [
+    {
+      key: "label",
+      header: "Component",
+      sortable: true,
+      render: (c) => {
+        const Icon = ICONS[c.key] ?? Server;
+        return (
+          <span className="inline-flex items-center gap-2.5 font-medium text-foreground">
+            <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {c.label}
+          </span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      sortValue: (c) => STATUS_ORDER[c.status] ?? 5,
+      render: (c) => {
+        const s = componentStatus(c.status);
+        return <Status tone={s.tone} label={s.label} />;
+      },
+    },
+    { key: "latency_ms", header: "Latency", numeric: true, sortable: true, render: (c) => formatDurationMs(c.latency_ms) },
+    {
+      key: "detail",
+      header: "Details",
+      truncate: true,
+      maxWidth: "32rem",
+      cellTitle: (c) => [c.info, c.detail].filter(Boolean).join(" · ") || undefined,
+      render: (c) =>
+        c.detail || c.info ? (
+          <span>
+            {c.info && <span className="text-muted-foreground">{c.info}</span>}
+            {c.info && c.detail && <span className="text-muted-foreground"> · </span>}
+            {c.detail && <span className={c.status === "up" ? "text-foreground" : "text-danger"}>{c.detail}</span>}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+  ];
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Components</h2>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {data.components.map((c) => (
-          <ComponentCard key={c.key} c={c} when={when} />
-        ))}
+    <section className="space-y-3" aria-labelledby="system-components-heading">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 id="system-components-heading" className="text-base font-semibold text-foreground">
+            Components
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Backend dependencies, checked live
+            {data?.generated_at && (
+              <>
+                {" "}
+                · last check <RelativeTime value={data.generated_at} />
+              </>
+            )}
+            .
+          </p>
+        </div>
+        <AutoRefreshIndicator intervalMs={COMPONENTS_REFRESH_MS} fetching={isFetching} />
       </div>
+      <DataTable<ComponentHealth>
+        aria-label="System components"
+        columns={columns}
+        data={data?.components ?? []}
+        keyFn={(c) => c.key}
+        loading={isLoading && !data}
+        skeletonRows={4}
+        pagination={false}
+        itemLabel="components"
+        defaultSort={{ key: "status", dir: "asc" }}
+        empty={{ icon: ShieldCheck, title: "Component status is not available" }}
+      />
     </section>
   );
 }

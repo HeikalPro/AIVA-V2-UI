@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Download, RotateCcw, Shield } from "lucide-react";
+import { Building2, CircleDot, FileDown, RotateCcw, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { formatUserError } from "@/lib/errors";
+import { formatNumber } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { getDefaultNavPermissionsForRole, ROLES } from "@/lib/roles";
-import { useAccounts } from "@/hooks/useAccounts";
 import {
   useDownloadRoleReportPdf,
   useNavPermissionCatalog,
@@ -11,31 +13,41 @@ import {
   useRoles,
   useUpdateRoleNavPermissions,
 } from "@/hooks/useRoles";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { Button } from "@/components/ui/button";
+import { Page, PageHeading } from "@/components/shell/page";
+import { EmptyState } from "@/components/data/empty-state";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
+import { PageAccessChecklist, resolvePageAccessEntries } from "@/components/users/PageAccessGroups";
+import { roleLabel } from "@/components/users/role-label";
 import type { RoleDefinition } from "@/types/api";
 
-function roleDisplayName(name: string): string {
-  if (name === ROLES.SUPER_ADMIN) return "Super Admin";
-  if (name === ROLES.ORG_ADMIN) return "Organization Admin";
-  if (name === ROLES.ACCOUNT_MANAGER) return "Account Manager";
-  if (name === ROLES.SUPERVISOR) return "Supervisor";
-  if (name === ROLES.DEVELOPER) return "Developer";
-  if (name === ROLES.AGENT) return "Agent";
-  return name;
+function permissionsMatch(a: string[], b: string[]) {
+  return [...a].sort().join(",") === [...b].sort().join(",");
 }
+
+function isRoleAtDefault(role: RoleDefinition) {
+  return permissionsMatch(role.nav_permissions, getDefaultNavPermissionsForRole(role.name));
+}
+
+/** A change that would drop unsaved edits, waiting for confirmation. */
+type PendingSwitch = { kind: "role"; roleId: number } | { kind: "account"; accountId: number | null };
 
 export function RolesPage() {
   const { user, refreshProfile } = useAuth();
+  const workspace = useWorkspace();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
   const canExportReport = isSuperAdmin || user?.roles.includes(ROLES.ORG_ADMIN);
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const [accountId, setAccountId] = useState<number | null>(null);
-  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+  // The page follows the shell's workspace account, but holds on to the current one while
+  // unsaved changes are pending until the user confirms (or the switch is reverted).
+  const [pageAccountId, setPageAccountId] = useState<number | null>(workspace.accountId);
+  const selectedAccountId = pageAccountId;
+  const selectedAccount = workspace.accounts.find((a) => a.id === selectedAccountId);
 
   const { data: roles = [], isLoading } = useRoles(selectedAccountId, isSuperAdmin || canExportReport);
   const { data: catalog = [] } = useNavPermissionCatalog(isSuperAdmin);
@@ -46,31 +58,56 @@ export function RolesPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
 
+  // Super Admin's access is fixed, so open the first role that can actually be configured.
+  const firstRole = useMemo(() => roles.find((r) => r.name !== ROLES.SUPER_ADMIN) ?? roles[0] ?? null, [roles]);
   const selectedRole = useMemo(
-    () => roles.find((r) => r.id === selectedId) ?? roles[0] ?? null,
-    [roles, selectedId],
+    () => roles.find((r) => r.id === selectedId) ?? firstRole,
+    [roles, selectedId, firstRole],
   );
 
   useEffect(() => {
-    if (roles.length && selectedId == null) {
-      setSelectedId(roles[0].id);
+    if (firstRole && selectedId == null) {
+      setSelectedId(firstRole.id);
     }
-  }, [roles, selectedId]);
+  }, [firstRole, selectedId]);
 
   useEffect(() => {
     if (selectedRole) {
       setDraft(selectedRole.nav_permissions);
-      setSuccessMessage(null);
       setError(null);
     }
   }, [selectedRole?.id, selectedRole?.nav_permissions.join(",")]);
 
+  const isDirty =
+    selectedRole != null &&
+    [...draft].sort().join(",") !== [...selectedRole.nav_permissions].sort().join(",");
+
+  // Workspace switched in the shell: follow it, or ask first when there are unsaved changes.
+  useEffect(() => {
+    if (workspace.accountId === pageAccountId) return;
+    if (isDirty) {
+      setPendingSwitch({ kind: "account", accountId: workspace.accountId });
+    } else {
+      setPageAccountId(workspace.accountId);
+      setSelectedId(null);
+    }
+    // Only react to the shell's selection changing.
+  }, [workspace.accountId]);
+
+  const canEditSelected = isSuperAdmin && selectedRole != null && selectedRole.name !== ROLES.SUPER_ADMIN;
+
   function togglePermission(key: string) {
     if (!isSuperAdmin || selectedRole?.name === ROLES.SUPER_ADMIN) return;
     setDraft((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
-    setSuccessMessage(null);
+  }
+
+  function toggleGroup(keys: string[], checked: boolean) {
+    if (!isSuperAdmin || selectedRole?.name === ROLES.SUPER_ADMIN) return;
+    setDraft((prev) => (checked ? [...prev, ...keys.filter((k) => !prev.includes(k))] : prev.filter((k) => !keys.includes(k))));
   }
 
   async function handleSave() {
@@ -82,7 +119,9 @@ export function RolesPage() {
         accountId: selectedAccountId,
         body: { nav_permissions: draft },
       });
-      setSuccessMessage("Page access updated for this account.");
+      toast.success("Page access saved", {
+        description: `${roleLabel(selectedRole.name)} on ${selectedAccount?.name ?? "this account"}`,
+      });
       await refreshProfile();
     } catch (e) {
       setError(formatUserError(e));
@@ -91,227 +130,323 @@ export function RolesPage() {
 
   async function handleDownloadReport() {
     if (selectedAccountId == null) return;
-    setError(null);
     try {
       await downloadReport.mutateAsync({
         organizationId: isSuperAdmin ? undefined : user?.organization_id,
         accountId: selectedAccountId,
       });
     } catch (e) {
-      setError(formatUserError(e));
+      toast.error("Couldn't generate the PDF report", { description: formatUserError(e) });
     }
-  }
-
-  function permissionsMatch(a: string[], b: string[]) {
-    return [...a].sort().join(",") === [...b].sort().join(",");
-  }
-
-  function isRoleAtDefault(role: RoleDefinition) {
-    return permissionsMatch(role.nav_permissions, getDefaultNavPermissionsForRole(role.name));
   }
 
   async function handleReset(role: RoleDefinition) {
     if (!isSuperAdmin || selectedAccountId == null || role.name === ROLES.SUPER_ADMIN) return;
-    const accountName = selectedAccount?.name ?? "this account";
-    const confirmed = window.confirm(
-      `Reset "${roleDisplayName(role.name)}" on ${accountName} to its default page access?`,
-    );
-    if (!confirmed) return;
-
     setError(null);
-    setSuccessMessage(null);
+    setResetError(null);
     try {
       await resetPermissions.mutateAsync({ roleId: role.id, accountId: selectedAccountId });
       if (role.id === selectedRole?.id) {
         setDraft(getDefaultNavPermissionsForRole(role.name));
       }
-      setSuccessMessage(`"${roleDisplayName(role.name)}" reset to default page access.`);
+      setResetOpen(false);
+      toast.success(`${roleLabel(role.name)} reset to default page access`, {
+        description: selectedAccount?.name,
+      });
       await refreshProfile();
     } catch (e) {
-      setError(formatUserError(e));
+      setResetError(formatUserError(e));
     }
   }
 
-  const isDirty =
-    selectedRole != null &&
-    [...draft].sort().join(",") !== [...selectedRole.nav_permissions].sort().join(",");
+  function requestRole(roleId: number) {
+    if (roleId === selectedRole?.id) return;
+    if (isDirty) setPendingSwitch({ kind: "role", roleId });
+    else setSelectedId(roleId);
+  }
+
+  function confirmSwitch() {
+    if (!pendingSwitch) return;
+    if (pendingSwitch.kind === "role") {
+      if (selectedRole) setDraft(selectedRole.nav_permissions);
+      setSelectedId(pendingSwitch.roleId);
+    } else {
+      setPageAccountId(pendingSwitch.accountId);
+      setSelectedId(null);
+    }
+    setPendingSwitch(null);
+  }
+
+  function cancelSwitch() {
+    // Put the shell's workspace back on the account whose edits are still open.
+    if (pendingSwitch?.kind === "account") workspace.setAccountId(pageAccountId);
+    setPendingSwitch(null);
+  }
+
+  const entries = useMemo(
+    () =>
+      resolvePageAccessEntries(
+        catalog.length ? catalog : (selectedRole?.nav_permissions ?? []).map((key) => ({ key, label: key })),
+      ),
+    [catalog, selectedRole],
+  );
+
+  const accountName = selectedAccount?.name ?? "this account";
+  const pendingRole = pendingSwitch?.kind === "role" ? roles.find((r) => r.id === pendingSwitch.roleId) : undefined;
+  const pendingAccount =
+    pendingSwitch?.kind === "account" ? workspace.accounts.find((a) => a.id === pendingSwitch.accountId) : undefined;
+
+  const heading = (
+    <PageHeading
+      title="Roles & Access"
+      description={
+        selectedAccount
+          ? `Choose which pages each role can open on ${selectedAccount.name}. Extra pages for one person are set on the Users page.`
+          : "Choose which pages each role can open, per account."
+      }
+      actions={
+        canExportReport && selectedAccountId != null ? (
+          <Button variant="outline" onClick={() => void handleDownloadReport()} loading={downloadReport.isPending}>
+            {!downloadReport.isPending && <FileDown aria-hidden="true" className="h-4 w-4" />}
+            {downloadReport.isPending ? "Generating…" : "Download PDF"}
+          </Button>
+        ) : undefined
+      }
+    />
+  );
+
+  if (!workspace.isLoading && selectedAccountId == null) {
+    return (
+      <Page width="wide">
+        {heading}
+        <EmptyState
+          icon={Building2}
+          title="No account selected"
+          description="Role access is configured per account. Create an account first, or pick one in the sidebar."
+        />
+      </Page>
+    );
+  }
+
+  const rolesLoading = workspace.isLoading || isLoading;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Roles & access"
-        description="Configure page access per account — e.g. Halan supervisors can differ from another account."
-        icon={Shield}
-        actions={
-          canExportReport && selectedAccountId != null ? (
-            <Button
-              variant="outline"
-              onClick={handleDownloadReport}
-              disabled={downloadReport.isPending}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              {downloadReport.isPending ? "Generating…" : "Download PDF report"}
-            </Button>
-          ) : undefined
+    <Page width="wide">
+      {heading}
+
+      <div className="grid items-start gap-5 lg:grid-cols-[17rem_minmax(0,1fr)]">
+        {/* ---- role list ---- */}
+        <nav aria-label="Roles" className="overflow-hidden rounded-lg border border-border bg-card lg:sticky lg:top-0">
+          <p className="border-b border-border bg-surface-muted px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Roles
+          </p>
+          {rolesLoading ? (
+            <div className="space-y-1 p-1.5" aria-busy="true">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} className="space-y-1.5 px-2.5 py-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              ))}
+            </div>
+          ) : roles.length === 0 ? (
+            <p className="px-3 py-4 text-sm text-muted-foreground">No roles for this account.</p>
+          ) : (
+            <ul className="space-y-0.5 p-1.5">
+              {roles.map((role) => {
+                const active = role.id === (selectedRole?.id ?? -1);
+                const isSA = role.name === ROLES.SUPER_ADMIN;
+                const modified = !isSA && !isRoleAtDefault(role);
+                const count = active && !isSA ? draft.length : role.nav_permissions.length;
+                const unsaved = active && isDirty;
+                return (
+                  <li key={role.id}>
+                    <button
+                      type="button"
+                      aria-current={active ? "true" : undefined}
+                      onClick={() => requestRole(role.id)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        active ? "bg-primary-muted" : "hover:bg-muted",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={cn(
+                            "block truncate text-sm font-medium",
+                            active ? "text-primary-muted-foreground" : "text-foreground",
+                          )}
+                        >
+                          {roleLabel(role.name)}
+                        </span>
+                        <span className="block text-xs tabular-nums text-muted-foreground">
+                          {isSA ? "All pages" : `${formatNumber(count)} ${count === 1 ? "page" : "pages"}`}
+                        </span>
+                      </span>
+                      {unsaved ? (
+                        <Badge variant="warning" className="mt-0.5">
+                          Unsaved
+                        </Badge>
+                      ) : modified ? (
+                        <Badge variant="outline" className="mt-0.5 text-muted-foreground" title="Differs from the default page access">
+                          Modified
+                        </Badge>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </nav>
+
+        {/* ---- permissions ---- */}
+        <section aria-labelledby="role-access-heading" className="min-w-0 rounded-lg border border-border bg-card">
+          {rolesLoading || !selectedRole ? (
+            <div className="space-y-4 p-5" aria-busy={rolesLoading || undefined}>
+              {rolesLoading ? (
+                <>
+                  <Skeleton className="h-5 w-40" />
+                  <Skeleton className="h-4 w-80" />
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {Array.from({ length: 4 }, (_, i) => (
+                      <Skeleton key={i} className="h-32 w-full" />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <EmptyState size="sm" icon={Shield} title="Select a role to view its page access" />
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 id="role-access-heading" className="text-base font-semibold text-foreground">
+                      {roleLabel(selectedRole.name)}
+                    </h2>
+                    {selectedRole.name !== ROLES.SUPER_ADMIN &&
+                      (isRoleAtDefault(selectedRole) ? (
+                        <Badge variant="neutral">Default access</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          Modified from default
+                        </Badge>
+                      ))}
+                  </div>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {selectedRole.name === ROLES.SUPER_ADMIN
+                      ? "Built-in administrator role."
+                      : `Users with this role on ${accountName} see only the checked pages.`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <ErrorAlert message={error} />
+                {selectedRole.name === ROLES.SUPER_ADMIN ? (
+                  <Alert tone="info">This role can't be changed. It includes every page, on every account.</Alert>
+                ) : (
+                  <>
+                    {!isSuperAdmin && (
+                      <Alert tone="neutral">Only Super Admin can change role access. You can view it here.</Alert>
+                    )}
+                    <PageAccessChecklist
+                      entries={entries}
+                      columns={2}
+                      isChecked={(key) => draft.includes(key)}
+                      isLocked={() => !canEditSelected}
+                      onToggle={(key) => togglePermission(key)}
+                      onToggleGroup={canEditSelected ? toggleGroup : undefined}
+                    />
+                  </>
+                )}
+              </div>
+
+              {canEditSelected && (
+                <div className="sticky bottom-0 z-[1] flex flex-wrap items-center gap-3 rounded-b-lg border-t border-border bg-card px-5 py-3">
+                  <p className="flex items-center gap-1.5 text-ui text-muted-foreground" aria-live="polite">
+                    {isDirty ? (
+                      <>
+                        <CircleDot aria-hidden="true" className="h-4 w-4 text-warning" />
+                        <span className="font-medium text-foreground">Unsaved changes</span>
+                      </>
+                    ) : (
+                      "No unsaved changes"
+                    )}
+                  </p>
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    {isDirty && (
+                      <Button variant="ghost" onClick={() => setDraft(selectedRole.nav_permissions)}>
+                        Discard
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setResetError(null);
+                        setResetOpen(true);
+                      }}
+                      disabled={isRoleAtDefault(selectedRole) || resetPermissions.isPending}
+                    >
+                      <RotateCcw aria-hidden="true" className="h-4 w-4" />
+                      Reset to default
+                    </Button>
+                    <Button onClick={() => void handleSave()} disabled={!isDirty} loading={updatePermissions.isPending}>
+                      {updatePermissions.isPending ? "Saving…" : "Save changes"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </div>
+
+      <ConfirmDialog
+        open={resetOpen && selectedRole != null}
+        title="Reset to default page access?"
+        message={
+          selectedRole
+            ? `${roleLabel(selectedRole.name)} on ${accountName} goes back to its default pages.${
+                isDirty ? " Your unsaved changes are discarded too." : ""
+              }`
+            : undefined
         }
+        confirmLabel="Reset to default"
+        loading={resetPermissions.isPending}
+        loadingLabel="Resetting…"
+        error={resetError}
+        onCancel={() => {
+          if (resetPermissions.isPending) return;
+          setResetOpen(false);
+          setResetError(null);
+        }}
+        onConfirm={() => {
+          if (selectedRole) void handleReset(selectedRole);
+        }}
       />
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="min-w-[260px]">
-          <Label>Account</Label>
-          <Select
-            value={selectedAccountId != null ? String(selectedAccountId) : ""}
-            onChange={(e) => {
-              setAccountId(Number(e.target.value));
-              setSelectedId(null);
-            }}
-            className="mt-1"
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-[#004080]/15 bg-[#004080]/5 px-4 py-3 text-sm text-slate-700">
-        <p className="font-medium text-[#004080]">
-          Account: {selectedAccount?.name ?? "—"}
-        </p>
-        <ul className="mt-2 list-inside list-disc space-y-1 text-slate-600">
-          <li>
-            <strong>Role on this account</strong> — e.g. Agent on Halan gets Chat only here.
-          </li>
-          <li>
-            <strong>Individual user</strong> (Users → Edit) — extra pages for one person on top of their role.
-          </li>
-        </ul>
-      </div>
-
-      {!selectedAccountId ? (
-        <p className="text-sm text-muted-foreground">Select an account to configure role access.</p>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-          <aside className="rounded-xl border bg-white p-3 shadow-sm">
-            <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Roles</p>
-            {isLoading ? (
-              <p className="px-2 py-4 text-sm text-muted-foreground">Loading roles…</p>
-            ) : (
-              <ul className="space-y-1">
-                {roles.map((role: RoleDefinition) => {
-                  const active = role.id === (selectedRole?.id ?? -1);
-                  const canReset = isSuperAdmin && role.name !== ROLES.SUPER_ADMIN;
-                  const atDefault = isRoleAtDefault(role);
-                  return (
-                    <li key={role.id} className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(role.id)}
-                        className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
-                          active
-                            ? "bg-primary/10 font-semibold text-[#004080]"
-                            : "text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        <span className="truncate">{roleDisplayName(role.name)}</span>
-                        <Badge variant="muted" className="ml-2 shrink-0 text-[10px] tabular-nums">
-                          {role.nav_permissions.length}
-                        </Badge>
-                      </button>
-                      {canReset && (
-                        <button
-                          type="button"
-                          title={atDefault ? "Already at default permissions" : "Reset to default"}
-                          aria-label={`Reset ${roleDisplayName(role.name)} to default`}
-                          onClick={() => handleReset(role)}
-                          disabled={atDefault || resetPermissions.isPending}
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-[#004080] disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </aside>
-
-          <section className="rounded-xl border bg-white p-5 shadow-sm">
-            {!selectedRole ? (
-              <p className="text-sm text-muted-foreground">Select a role to view page access.</p>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-900">{roleDisplayName(selectedRole.name)}</h2>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {selectedRole.name === ROLES.SUPER_ADMIN
-                        ? "Super Admin always has access to every page."
-                        : `Users with this role on ${selectedAccount?.name ?? "this account"} see only the checked pages.`}
-                    </p>
-                  </div>
-                  {isSuperAdmin && selectedRole.name !== ROLES.SUPER_ADMIN && (
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => handleReset(selectedRole)}
-                        disabled={isRoleAtDefault(selectedRole) || resetPermissions.isPending}
-                      >
-                        <RotateCcw className="mr-2 h-4 w-4" />
-                        {resetPermissions.isPending ? "Resetting…" : "Reset to default"}
-                      </Button>
-                      <Button
-                        onClick={handleSave}
-                        disabled={!isDirty || updatePermissions.isPending}
-                      >
-                        {updatePermissions.isPending ? "Saving…" : "Save changes"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {(catalog.length ? catalog : selectedRole.nav_permissions.map((key) => ({ key, label: key }))).map(
-                    (item) => {
-                      const checked = draft.includes(item.key);
-                      const locked = !isSuperAdmin || selectedRole.name === ROLES.SUPER_ADMIN;
-                      return (
-                        <label
-                          key={item.key}
-                          className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 transition-colors ${
-                            checked ? "border-[#004080]/30 bg-[#004080]/5" : "border-slate-200 bg-white hover:border-slate-300"
-                          } ${locked ? "cursor-default opacity-90" : ""}`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#004080] focus:ring-[#004080]/30"
-                            checked={checked}
-                            disabled={locked}
-                            onChange={() => togglePermission(item.key)}
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium text-slate-900">{item.label}</span>
-                            <span className="block text-xs text-slate-500">{item.key}</span>
-                          </span>
-                          {checked && <Check className="ml-auto h-4 w-4 shrink-0 text-[#004080]" />}
-                        </label>
-                      );
-                    },
-                  )}
-                </div>
-
-                {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
-                {successMessage && !error && (
-                  <p className="mt-4 text-sm text-emerald-700">{successMessage}</p>
-                )}
-              </>
-            )}
-          </section>
-        </div>
-      )}
-    </div>
+      <ConfirmDialog
+        open={pendingSwitch != null}
+        title="Discard unsaved changes?"
+        message={
+          selectedRole
+            ? `You changed the page access of ${roleLabel(selectedRole.name)} on ${accountName} without saving. ${
+                pendingSwitch?.kind === "account"
+                  ? `Switching to ${pendingAccount?.name ?? "another account"} discards these changes.`
+                  : `Opening ${pendingRole ? roleLabel(pendingRole.name) : "another role"} discards these changes.`
+              }`
+            : undefined
+        }
+        confirmLabel="Discard changes"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={confirmSwitch}
+        onCancel={cancelSwitch}
+      />
+    </Page>
   );
 }

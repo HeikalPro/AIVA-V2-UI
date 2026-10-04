@@ -1,45 +1,100 @@
-import { useMemo, useState } from "react";
-import { Plus, Ticket as TicketIcon, Trash2 } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
+import { AlertCircle, Pencil, Plus, Ticket as TicketIcon, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatUserError } from "@/lib/errors";
+import { formatDateTime, formatNumber, formatRelativeTime } from "@/lib/format";
 import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOrganizations } from "@/hooks/useOrganizations";
 import { useTickets, useTicketOpenCount, useCreateTicket, useUpdateTicket, useDeleteTicket } from "@/hooks/useTickets";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { filterRows } from "@/lib/table-filters";
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { FilterBar, type DateRangeValue } from "@/components/data/filter-bar";
+import { Status } from "@/components/data/status";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ErrorAlert } from "@/components/shared/ErrorAlert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldGroup } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
+import { toast } from "@/components/ui/toast";
+import { useDeepLinks } from "@/components/users/useDeepLinks";
 import type { DeveloperNotify, Ticket } from "@/types/api";
+import { useReturnFocus } from "@/components/users/useReturnFocus";
+
+const STATUS_OPTIONS = [
+  { value: "OPEN", label: "Open" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "RESOLVED", label: "Resolved" },
+  { value: "CLOSED", label: "Closed" },
+];
+
+/** Local calendar day (YYYY-MM-DD) of an ISO timestamp, for the date-range filter. */
+function localDay(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Transient result of the developer email that follows a new ticket. */
+function notifyToast(notify: DeveloperNotify | undefined, subject: string) {
+  if (!notify) {
+    toast.success("Ticket created", { description: subject });
+    return;
+  }
+  if (notify.status === "sent") {
+    toast.success("Ticket created · developer email sent", { description: notify.message });
+  } else if (notify.status === "failed") {
+    toast.warning("Ticket created · developer email not sent", { description: notify.message });
+  } else {
+    toast.info("Ticket created · developer email skipped", { description: notify.message });
+  }
+}
 
 export function TicketsPage() {
   const { user } = useAuth();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
   const canSubmitTickets = user != null && canAccessPermission(user, "tickets");
+  const canDeleteTickets = Boolean(isSuperAdmin || user?.roles.includes(ROLES.ORG_ADMIN));
   const { data: openBadge } = useTicketOpenCount(isSuperAdmin ?? false);
   const openForSuperAdmin = openBadge?.open_count ?? 0;
-  const { data: organizations = [] } = useOrganizations(isSuperAdmin ?? false);
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const { data = [], isLoading } = useTickets({ organization_id: isSuperAdmin ? undefined : user?.organization_id });
+  const orgsQuery = useOrganizations(isSuperAdmin ?? false);
+  const { data: organizations = [] } = orgsQuery;
+  const accountsQuery = useAccounts(isSuperAdmin ? null : user?.organization_id);
+  const { data: accounts = [] } = accountsQuery;
+  const ticketsQuery = useTickets({ organization_id: isSuperAdmin ? undefined : user?.organization_id });
+  const { data = [], isLoading } = ticketsQuery;
   const createTicket = useCreateTicket();
   const updateTicket = useUpdateTicket();
   const deleteTicket = useDeleteTicket();
+  const returnFocus = useReturnFocus();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Ticket | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [orgFilter, setOrgFilter] = useState("ALL");
   const [accountFilter, setAccountFilter] = useState("ALL");
+  const [dateRange, setDateRange] = useState<DateRangeValue>({ from: "", to: "" });
   const [form, setForm] = useState({
     organization_id: "",
     account_id: "",
@@ -50,7 +105,6 @@ export function TicketsPage() {
     assigned_to: "",
   });
   const [error, setError] = useState<string | null>(null);
-  const [emailNotify, setEmailNotify] = useState<DeveloperNotify | null>(null);
 
   const accountNameById = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
   const organizationNameById = useMemo(
@@ -64,6 +118,11 @@ export function TicketsPage() {
       ).sort((a, b) => a.localeCompare(b)),
     [data],
   );
+
+  function accountLabel(t: Ticket): string {
+    return t.account_id != null ? accountNameById.get(t.account_id) ?? `Account #${t.account_id}` : "";
+  }
+
   const filteredData = useMemo(
     () =>
       filterRows(
@@ -83,9 +142,17 @@ export function TicketsPage() {
           (t) => typeFilter === "ALL" || t.ticket_type === typeFilter,
           (t) => orgFilter === "ALL" || String(t.organization_id) === orgFilter,
           (t) => accountFilter === "ALL" || String(t.account_id) === accountFilter,
+          (t) => {
+            if (!dateRange.from && !dateRange.to) return true;
+            const day = t.created_at ? localDay(t.created_at) : "";
+            if (!day) return false;
+            if (dateRange.from && day < dateRange.from) return false;
+            if (dateRange.to && day > dateRange.to) return false;
+            return true;
+          },
         ],
       ),
-    [data, search, statusFilter, typeFilter, orgFilter, accountFilter, organizationNameById, accountNameById],
+    [data, search, statusFilter, typeFilter, orgFilter, accountFilter, dateRange, organizationNameById, accountNameById],
   );
 
   const filterAccounts = useMemo(() => {
@@ -117,7 +184,6 @@ export function TicketsPage() {
       assigned_to: "",
     });
     setError(null);
-    setEmailNotify(null);
     setDialogOpen(true);
   }
 
@@ -133,9 +199,17 @@ export function TicketsPage() {
       assigned_to: t.assigned_to != null ? String(t.assigned_to) : "",
     });
     setError(null);
-    setEmailNotify(null);
     setDialogOpen(true);
   }
+
+  // Command palette: ?action=create opens the create dialog (once organizations/accounts that
+  // drive its defaults have loaded); ?q= pre-fills the search.
+  useDeepLinks({
+    onCreate: openCreate,
+    canCreate: canSubmitTickets,
+    onSearch: setSearch,
+    ready: !accountsQuery.isLoading && !(isSuperAdmin && orgsQuery.isLoading),
+  });
 
   async function handleSave() {
     setError(null);
@@ -151,6 +225,7 @@ export function TicketsPage() {
             assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
           },
         });
+        toast.success("Ticket updated", { description: form.subject || undefined });
       } else {
         const created = await createTicket.mutateAsync({
           organization_id: isSuperAdmin ? Number(form.organization_id) : user!.organization_id,
@@ -159,13 +234,18 @@ export function TicketsPage() {
           subject: form.subject,
           description: form.description,
         });
-        setEmailNotify(created.developer_notify);
-        return;
+        notifyToast(created.developer_notify, form.subject);
       }
       setDialogOpen(false);
     } catch (e) {
       setError(formatUserError(e));
     }
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (createTicket.isPending || updateTicket.isPending) return;
+    void handleSave();
   }
 
   function clearFilters() {
@@ -174,255 +254,371 @@ export function TicketsPage() {
     setTypeFilter("ALL");
     setOrgFilter("ALL");
     setAccountFilter("ALL");
+    setDateRange({ from: "", to: "" });
   }
 
+  /* ---- table ---------------------------------------------------------------------------- */
+
+  const columns: Column<Ticket>[] = [
+    { key: "id", header: "ID", numeric: true, sortable: true, defaultHidden: true, width: 72 },
+    {
+      key: "subject",
+      header: "Subject",
+      sortable: true,
+      sortValue: (t) => (t.subject ?? "").toLowerCase(),
+      minWidth: 220,
+      render: (t) => (
+        <div className="min-w-0 max-w-[24rem]">
+          <p className="truncate font-medium text-foreground" title={t.subject ?? undefined}>
+            {t.subject ? <span dir="auto">{t.subject}</span> : <span className="text-muted-foreground">No subject</span>}
+          </p>
+          {t.description && (
+            <p className="truncate text-xs text-muted-foreground" title={t.description}>
+              <span dir="auto">{t.description}</span>
+            </p>
+          )}
+        </div>
+      ),
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            key: "organization_id",
+            header: "Organization",
+            sortable: true,
+            sortValue: (t: Ticket) => organizationNameById.get(t.organization_id) ?? "",
+            render: (t: Ticket) => (
+              <span dir="auto" className="block max-w-[12rem] truncate">
+                {organizationNameById.get(t.organization_id) ?? `Org #${t.organization_id}`}
+              </span>
+            ),
+          } satisfies Column<Ticket>,
+        ]
+      : []),
+    {
+      key: "account_id",
+      header: "Account",
+      sortable: true,
+      sortValue: (t) => accountLabel(t) || null,
+      render: (t) =>
+        t.account_id != null ? (
+          <span dir="auto" className="block max-w-[12rem] truncate">
+            {accountLabel(t)}
+          </span>
+        ) : (
+          <span className="text-subtle-foreground">—</span>
+        ),
+    },
+    {
+      key: "ticket_type",
+      header: "Type",
+      sortable: true,
+      render: (t) => (t.ticket_type ? <Badge variant="neutral">{t.ticket_type}</Badge> : <span className="text-subtle-foreground">—</span>),
+    },
+    { key: "status", header: "Status", sortable: true, render: (t) => <Status value={t.status} /> },
+    {
+      key: "created_at",
+      header: "Created",
+      sortable: true,
+      render: (t) =>
+        t.created_at ? (
+          <Tooltip content={formatDateTime(t.created_at)}>
+            <span className="whitespace-nowrap text-muted-foreground">{formatRelativeTime(t.created_at)}</span>
+          </Tooltip>
+        ) : (
+          <span className="text-subtle-foreground">—</span>
+        ),
+    },
+    actionsColumn<Ticket>(
+      (t) => [
+        { label: "Edit", icon: Pencil, onSelect: () => openEdit(t) },
+        {
+          label: "Delete",
+          icon: Trash2,
+          destructive: true,
+          separatorBefore: true,
+          hidden: !canDeleteTickets,
+          onSelect: () => {
+            setDeleteError(null);
+            setDeleteId(t.id);
+          },
+        },
+      ],
+      { label: (t) => `Actions for ticket ${t.id}` },
+    ),
+  ];
+
+  const isFiltered =
+    search.trim() !== "" ||
+    statusFilter !== "ALL" ||
+    typeFilter !== "ALL" ||
+    orgFilter !== "ALL" ||
+    accountFilter !== "ALL" ||
+    Boolean(dateRange.from || dateRange.to);
+
+  let empty: DataTableEmpty;
+  if (ticketsQuery.isError) {
+    empty = {
+      icon: AlertCircle,
+      title: "Couldn't load tickets",
+      description: formatUserError(ticketsQuery.error),
+      action: (
+        <Button variant="outline" size="sm" onClick={() => void ticketsQuery.refetch()}>
+          Try again
+        </Button>
+      ),
+    };
+  } else if (data.length === 0) {
+    empty = {
+      icon: TicketIcon,
+      title: "No tickets yet",
+      description: canSubmitTickets ? "Report a problem or request a change for your team." : undefined,
+      action: canSubmitTickets ? (
+        <Button size="sm" onClick={openCreate}>
+          <Plus aria-hidden="true" className="h-4 w-4" />
+          Create ticket
+        </Button>
+      ) : undefined,
+    };
+  } else {
+    empty = {
+      title: "No tickets match these filters",
+      action: (
+        <Button variant="outline" size="sm" onClick={clearFilters}>
+          Clear filters
+        </Button>
+      ),
+    };
+  }
+
+  const deleteTarget = deleteId != null ? data.find((t) => t.id === deleteId) : undefined;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={TicketIcon}
+    <Page width="wide">
+      <PageHeading
         title="Tickets"
         description={
           isSuperAdmin && openForSuperAdmin > 0
-            ? `${openForSuperAdmin} open or in-progress ticket${openForSuperAdmin === 1 ? "" : "s"} need your attention`
-            : "Tickets from organization admins, account managers, supervisors, and developers (super admins triage here)"
+            ? `${formatNumber(openForSuperAdmin)} open or in-progress ticket${openForSuperAdmin === 1 ? "" : "s"} need your attention.`
+            : "Requests from organization admins, account managers, supervisors and developers. Super Admins triage them here."
+        }
+        meta={
+          isLoading ? (
+            <Skeleton className="h-4 w-16" />
+          ) : ticketsQuery.isError ? null : (
+            <span>
+              {formatNumber(data.length)} {data.length === 1 ? "ticket" : "tickets"}
+            </span>
+          )
         }
         actions={
           canSubmitTickets ? (
             <Button onClick={openCreate}>
-              <Plus className="mr-2 h-4 w-4" /> New Ticket
+              <Plus aria-hidden="true" className="h-4 w-4" />
+              Create ticket
             </Button>
           ) : undefined
         }
       />
 
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search by subject, type, status, account, or organization…"
-        filters={[
-          ...(isSuperAdmin
-            ? [
-                {
-                  id: "ticket-org-filter",
-                  label: "Organization",
-                  value: orgFilter,
-                  onChange: setOrgFilter,
-                  options: [
-                    { value: "ALL", label: "All organizations" },
-                    ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
-                  ],
-                },
-              ]
-            : []),
-          {
-            id: "ticket-status-filter",
-            label: "Status",
-            value: statusFilter,
-            onChange: setStatusFilter,
-            options: [
-              { value: "ALL", label: "All statuses" },
-              { value: "OPEN", label: "Open" },
-              { value: "IN_PROGRESS", label: "In progress" },
-              { value: "RESOLVED", label: "Resolved" },
-              { value: "CLOSED", label: "Closed" },
-            ],
-          },
-          {
-            id: "ticket-type-filter",
-            label: "Type",
-            value: typeFilter,
-            onChange: setTypeFilter,
-            options: [
-              { value: "ALL", label: "All types" },
-              ...ticketTypeOptions.map((t) => ({ value: t, label: t })),
-            ],
-          },
-          {
-            id: "ticket-account-filter",
-            label: "Account",
-            value: accountFilter,
-            onChange: setAccountFilter,
-            options: [
-              { value: "ALL", label: "All accounts" },
-              ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name })),
-            ],
-          },
-        ]}
-        onClear={clearFilters}
-        totalCount={data.length}
-        filteredCount={filteredData.length}
-      />
-
       <DataTable<Ticket>
-        columns={[
-          { key: "id", header: "ID", sortable: true },
-          { key: "subject", header: "Subject", sortable: true },
-          ...(isSuperAdmin
-            ? [
-                {
-                  key: "organization_id",
-                  header: "Organization",
-                  render: (r: Ticket) => organizationNameById.get(r.organization_id) ?? `Org #${r.organization_id}`,
-                },
-                {
-                  key: "account_id",
-                  header: "Account",
-                  render: (r: Ticket) =>
-                    r.account_id != null
-                      ? accountNameById.get(r.account_id) ?? `Account #${r.account_id}`
-                      : "—",
-                },
-              ]
-            : []),
-          {
-            key: "created_at",
-            header: "Date",
-            sortable: true,
-            render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString() : "—"),
-          },
-          { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-          { key: "ticket_type", header: "Type", render: (r) => r.ticket_type ?? "—" },
-          {
-            key: "actions",
-            header: "",
-            render: (r) => (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</Button>
-                {(isSuperAdmin || user?.roles.includes(ROLES.ORG_ADMIN)) && (
-                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setDeleteId(r.id); }}>
-                    <Trash2 className="h-4 w-4 text-red-500" />
-                  </Button>
-                )}
-              </div>
-            ),
-          },
-        ]}
-        data={filteredData}
-        keyFn={(r) => r.id}
+        aria-label="Tickets"
+        columns={columns}
+        data={ticketsQuery.isError ? [] : filteredData}
+        keyFn={(t) => t.id}
         loading={isLoading}
-        emptyMessage={data.length ? "No tickets match your search or filters" : "No tickets"}
+        empty={empty}
         onRowClick={openEdit}
+        rowLabel={(t) => t.subject ?? `Ticket ${t.id}`}
+        itemLabel="tickets"
+        defaultSort={{ key: "created_at", dir: "desc" }}
+        enableColumnVisibility
+        persistKey="tickets"
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search subject, type, account…"
+            filters={[
+              {
+                id: "ticket-status-filter",
+                label: "Status",
+                value: statusFilter,
+                onChange: setStatusFilter,
+                options: [{ value: "ALL", label: "All" }, ...STATUS_OPTIONS],
+              },
+              {
+                id: "ticket-type-filter",
+                label: "Type",
+                value: typeFilter,
+                onChange: setTypeFilter,
+                options: [{ value: "ALL", label: "All" }, ...ticketTypeOptions.map((t) => ({ value: t, label: t }))],
+              },
+              {
+                id: "ticket-org-filter",
+                label: "Organization",
+                value: orgFilter,
+                onChange: setOrgFilter,
+                hidden: !isSuperAdmin,
+                options: [
+                  { value: "ALL", label: "All" },
+                  ...organizations.map((o) => ({ value: String(o.id), label: o.name })),
+                ],
+              },
+              {
+                id: "ticket-account-filter",
+                label: "Account",
+                value: accountFilter,
+                onChange: setAccountFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  ...filterAccounts.map((a) => ({ value: String(a.id), label: a.name })),
+                ],
+              },
+            ]}
+            dateRange={{ ...dateRange, onChange: setDateRange, presets: true, label: "Created" }}
+            onClear={clearFilters}
+            isFiltered={isFiltered}
+            totalCount={isFiltered ? data.length : undefined}
+            filteredCount={filteredData.length}
+            itemLabel="tickets"
+          />
+        }
       />
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] max-w-lg flex-col overflow-hidden p-0">
-          <DialogHeader className="mb-0 border-b border-slate-100 px-6 py-4">
-            <DialogTitle>{editing ? "Edit Ticket" : "New Ticket"}</DialogTitle>
-          </DialogHeader>
-          <DialogBody className="min-h-0 flex-1 px-6 py-4">
-          <div className="space-y-4">
-            {!editing && (
-              <>
-                {isSuperAdmin && (
-                  <div>
-                    <Label>Organization</Label>
-                    <Select
-                      value={form.organization_id}
-                      onChange={(e) => setForm({ ...form, organization_id: e.target.value, account_id: "" })}
-                      className="mt-1"
-                    >
-                      {organizations.map((o) => (
-                        <option key={o.id} value={o.id}>{o.name}</option>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen} size="lg">
+        <DialogContent onCloseAutoFocus={returnFocus}>
+          <form onSubmit={onSubmit} noValidate className="contents">
+            <DialogHeader>
+              <DialogTitle>{editing ? `Edit ticket #${editing.id}` : "Create ticket"}</DialogTitle>
+              <DialogDescription>
+                {editing
+                  ? [
+                      isSuperAdmin ? organizationNameById.get(editing.organization_id) : null,
+                      editing.account_id != null ? accountLabel(editing) : null,
+                      editing.created_at ? `created ${formatDateTime(editing.created_at)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : "Describe the problem or request. Super Admins are notified and triage it."}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogBody className="space-y-4">
+              <ErrorAlert message={error} />
+              {!editing && (
+                <FieldGroup>
+                  {isSuperAdmin && (
+                    <Field label="Organization">
+                      <Select
+                        value={form.organization_id}
+                        onChange={(e) => setForm({ ...form, organization_id: e.target.value, account_id: "" })}
+                      >
+                        {organizations.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+                  <Field label="Account" hint="Optional">
+                    <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}>
+                      <option value="">None</option>
+                      {createAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                          {isSuperAdmin && !form.organization_id ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
+                        </option>
                       ))}
                     </Select>
-                  </div>
+                  </Field>
+                </FieldGroup>
+              )}
+              <Field label="Subject" required>
+                <Input dir="auto" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />
+              </Field>
+              <Field label="Description">
+                <Textarea
+                  dir="auto"
+                  rows={6}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+              </Field>
+              <FieldGroup>
+                <Field label="Type" hint="e.g. SUPPORT, Bug, Request">
+                  <Input value={form.ticket_type} onChange={(e) => setForm({ ...form, ticket_type: e.target.value })} />
+                </Field>
+                {editing && (
+                  <Field label="Status">
+                    <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                      {!STATUS_OPTIONS.some((o) => o.value === form.status) && (
+                        <option value={form.status}>{form.status}</option>
+                      )}
+                      {STATUS_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
                 )}
-                <div>
-                  <Label>Account</Label>
-                  <Select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="mt-1">
-                    <option value="">None</option>
-                    {createAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}{isSuperAdmin && !form.organization_id ? ` (${a.organization_name ?? `org ${a.organization_id}`})` : ""}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </>
-            )}
-            <div><Label>Subject</Label><Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} className="mt-1" /></div>
-            <div>
-              <Label>Description</Label>
-              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={4} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Type</Label>
-                <Input value={form.ticket_type} onChange={(e) => setForm({ ...form, ticket_type: e.target.value })} className="mt-1" />
-              </div>
-            </div>
-            {editing && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Status</Label>
-                  <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="mt-1">
-                    <option value="OPEN">OPEN</option>
-                    <option value="IN_PROGRESS">IN_PROGRESS</option>
-                    <option value="RESOLVED">RESOLVED</option>
-                    <option value="CLOSED">CLOSED</option>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Assigned To (User ID)</Label>
-                  <Input value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })} className="mt-1" />
-                </div>
-              </div>
-            )}
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            {emailNotify && (
-              <div
-                className={
-                  emailNotify.status === "sent"
-                    ? "rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
-                    : emailNotify.status === "disabled" || emailNotify.status === "no_recipients"
-                      ? "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                      : "rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-                }
-                role="status"
-              >
-                <p className="font-medium">
-                  {emailNotify.status === "sent"
-                    ? "Developer email sent"
-                    : emailNotify.status === "failed"
-                      ? "Developer email not sent"
-                      : "Developer email skipped"}
-                </p>
-                <p className="mt-1">{emailNotify.message}</p>
-              </div>
-            )}
-          </div>
-          </DialogBody>
-          <DialogFooter className="mt-0 border-t border-slate-100 px-6 py-4">
-            {emailNotify ? (
-              <Button
-                onClick={() => {
-                  setEmailNotify(null);
-                  setDialogOpen(false);
-                }}
-              >
-                Close
+              </FieldGroup>
+              {editing && (
+                <FieldGroup>
+                  <Field label="Assigned to" hint="Numeric user ID of the assignee. Leave empty to unassign.">
+                    <Input
+                      inputMode="numeric"
+                      className="font-mono"
+                      placeholder="User ID"
+                      value={form.assigned_to}
+                      onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+                    />
+                  </Field>
+                </FieldGroup>
+              )}
+            </DialogBody>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                Cancel
               </Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleSave} disabled={createTicket.isPending || updateTicket.isPending}>
-                  {editing ? "Save" : createTicket.isPending ? "Creating…" : "Create"}
-                </Button>
-              </>
-            )}
-          </DialogFooter>
+              <Button type="submit" loading={createTicket.isPending || updateTicket.isPending}>
+                {editing ? "Save changes" : createTicket.isPending ? "Creating…" : "Create ticket"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
       <ConfirmDialog
         open={deleteId != null}
         title="Delete ticket"
-        message="This action cannot be undone."
+        message={
+          deleteTarget?.subject
+            ? `Delete “${deleteTarget.subject}”? This can't be undone.`
+            : "This action cannot be undone."
+        }
         destructive
+        confirmLabel="Delete"
         loading={deleteTicket.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={async () => { if (deleteId) await deleteTicket.mutateAsync(deleteId); setDeleteId(null); }}
+        loadingLabel="Deleting…"
+        error={deleteError}
+        onCancel={() => {
+          setDeleteId(null);
+          setDeleteError(null);
+        }}
+        onConfirm={async () => {
+          if (!deleteId) return;
+          setDeleteError(null);
+          try {
+            await deleteTicket.mutateAsync(deleteId);
+            toast.success("Ticket deleted");
+            setDeleteId(null);
+          } catch (e) {
+            setDeleteError(formatUserError(e));
+          }
+        }}
       />
-    </div>
+    </Page>
   );
 }

@@ -1,232 +1,325 @@
-import { useEffect, useMemo, useState } from "react";
-import { Activity, Clock, DollarSign, LayoutDashboard, MessageSquare, Users, Zap } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertCircle, BarChart3, Building2, Clock, Coins, Gauge, Lock, Zap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { ROLES, canAccess, canAccessPermission } from "@/lib/roles";
-import { useAccounts } from "@/hooks/useAccounts";
-import { useAgentMetrics, useDashboardStats } from "@/hooks/useAnalytics";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { KPIStatCard } from "@/components/shared/KPIStatCard";
-import { OverviewCharts } from "@/components/dashboard/OverviewCharts";
-import { DataTable } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { filterRows } from "@/lib/table-filters";
+import { ApiError, formatUserError } from "@/lib/errors";
+import { formatDurationMs, formatMoney, formatNumber, formatPercent } from "@/lib/format";
+import { useAgentMetrics, useAiTimeseries, useDashboardStats } from "@/hooks/useAnalytics";
+import { useAiMetrics } from "@/hooks/useLogs";
+import { Page, PageHeading } from "@/components/shell/page";
+import { Stat, StatGroup } from "@/components/data/stat";
+import { EmptyState } from "@/components/data/empty-state";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
-import type { AgentMetric } from "@/types/api";
+import { AiActivityCard } from "@/components/dashboard/AiActivityCard";
+import { AnswerOutcomesCard } from "@/components/dashboard/AnswerOutcomesCard";
+import { AiCostCard } from "@/components/dashboard/AiCostCard";
+import { AgentPerformanceTable } from "@/components/dashboard/AgentPerformanceTable";
+import { RANGE_OPTIONS, lastNDays, rangeLabel, type RangeDays } from "@/components/dashboard/dashboard-utils";
 
 const ANALYTICS_VIEW_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.ACCOUNT_MANAGER, ROLES.SUPERVISOR];
+/** Mirrors the backend gate on /api/logs/ai-metrics: SA, OA, DEV, or the "logs" page permission. */
+const AI_METRICS_ROLES = [ROLES.SUPER_ADMIN, ROLES.ORG_ADMIN, ROLES.DEVELOPER];
 
-function agentDisplayName(metric: AgentMetric): string {
-  const name = [metric.agent_first_name, metric.agent_last_name].filter(Boolean).join(" ").trim();
-  return name || metric.agent_email || `User #${metric.user_id}`;
+function isForbidden(error: unknown) {
+  return error instanceof ApiError && error.status === 403;
 }
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN);
+  const workspace = useWorkspace();
   const canViewDashboard = user ? canAccessPermission(user, "dashboard") : false;
   const canViewAnalytics =
-    user != null &&
-    (canAccessPermission(user, "dashboard") ||
-      canAccess(user.roles, ANALYTICS_VIEW_ROLES));
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const [accountId, setAccountId] = useState<number | null>(null);
-  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
+    user != null && (canAccessPermission(user, "dashboard") || canAccess(user.roles, ANALYTICS_VIEW_ROLES));
+  const canViewAiMetrics =
+    user != null && (canAccess(user.roles, AI_METRICS_ROLES) || canAccessPermission(user, "logs"));
 
-  const { data: stats } = useDashboardStats(selectedAccountId, canViewAnalytics);
-  const { data: agents = [], isLoading: agentsLoading } = useAgentMetrics(selectedAccountId, canViewAnalytics);
+  const accountId = workspace.accountId;
+  const [days, setDays] = useState<RangeDays>(30);
+  const range = useMemo(() => lastNDays(days), [days]);
 
-  const [search, setSearch] = useState("");
-  const [usageFilter, setUsageFilter] = useState("ALL");
-  const [escalationFilter, setEscalationFilter] = useState("ALL");
-  const [responseFilter, setResponseFilter] = useState("ALL");
-
-  useEffect(() => {
-    setSearch("");
-    setUsageFilter("ALL");
-    setEscalationFilter("ALL");
-    setResponseFilter("ALL");
-  }, [selectedAccountId]);
-
-  const filteredAgents = useMemo(
-    () =>
-      filterRows(
-        agents,
-        search,
-        (r) =>
-          [
-            agentDisplayName(r),
-            r.agent_email ?? "",
-            String(r.user_id),
-            String(r.ai_usage_count ?? ""),
-            String(r.successful_answers ?? ""),
-          ].join(" "),
-        [
-          (r) => {
-            const usage = r.ai_usage_count ?? 0;
-            if (usageFilter === "LOW") return usage < 10;
-            if (usageFilter === "MEDIUM") return usage >= 10 && usage < 50;
-            if (usageFilter === "HIGH") return usage >= 50;
-            return true;
-          },
-          (r) => {
-            const esc = r.escalation_count ?? 0;
-            if (escalationFilter === "WITH") return esc > 0;
-            if (escalationFilter === "NONE") return esc === 0;
-            return true;
-          },
-          (r) => {
-            const ms = r.avg_response_time;
-            if (responseFilter === "FAST") return ms != null && ms < 3000;
-            if (responseFilter === "SLOW") return ms != null && ms >= 3000;
-            if (responseFilter === "UNKNOWN") return ms == null;
-            return true;
-          },
-        ],
-      ),
-    [agents, search, usageFilter, escalationFilter, responseFilter],
+  const stats = useDashboardStats(accountId, canViewAnalytics);
+  const agentsQuery = useAgentMetrics(accountId, canViewAnalytics);
+  const timeseries = useAiTimeseries(accountId, days, canViewAnalytics && accountId != null);
+  const aiMetrics = useAiMetrics(
+    { account_id: accountId, start: range.start, end: range.end },
+    canViewAnalytics && canViewAiMetrics && accountId != null,
   );
 
-  function clearAgentFilters() {
-    setSearch("");
-    setUsageFilter("ALL");
-    setEscalationFilter("ALL");
-    setResponseFilter("ALL");
-  }
+  const agents = useMemo(() => agentsQuery.data ?? [], [agentsQuery.data]);
+  const agentTotals = useMemo(() => {
+    let successful = 0;
+    let failed = 0;
+    let escalations = 0;
+    for (const a of agents) {
+      successful += a.successful_answers ?? 0;
+      failed += a.failed_answers ?? 0;
+      escalations += a.escalation_count ?? 0;
+    }
+    return { successful, failed, escalations, answered: successful + failed };
+  }, [agents]);
 
   if (!canViewDashboard) {
-    return <p className="text-sm text-muted-foreground">You do not have access to the dashboard.</p>;
+    return (
+      <Page width="wide">
+        <PageHeading title="Dashboard" />
+        <EmptyState icon={Lock} title="You don't have access to the dashboard" description="Ask an administrator for dashboard access." />
+      </Page>
+    );
   }
 
+  const accountName = workspace.account?.name;
+  const heading = (
+    <PageHeading
+      title="Dashboard"
+      description={
+        accountName
+          ? `Usage, answer quality, speed and cost of AIVA for ${accountName}.`
+          : "Usage, answer quality, speed and cost of AIVA."
+      }
+      actions={
+        canViewAnalytics && accountId != null ? (
+          <Select
+            aria-label="Date range"
+            value={days}
+            onChange={(event) => setDays(Number(event.target.value) as RangeDays)}
+            className="w-40"
+          >
+            {RANGE_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {rangeLabel(d)}
+              </option>
+            ))}
+          </Select>
+        ) : undefined
+      }
+    />
+  );
+
+  if (!workspace.isLoading && accountId == null) {
+    return (
+      <Page width="wide">
+        {heading}
+        <EmptyState
+          icon={Building2}
+          title="No account selected"
+          description={
+            user?.roles.includes(ROLES.SUPER_ADMIN)
+              ? "There are no accounts yet. Create one on the Accounts page to see its analytics here."
+              : "You don't have access to any account yet. Ask an administrator to add you to one."
+          }
+        />
+      </Page>
+    );
+  }
+
+  if (!canViewAnalytics) {
+    return (
+      <Page width="wide">
+        {heading}
+        <EmptyState icon={BarChart3} title="Analytics aren't available for your role" />
+      </Page>
+    );
+  }
+
+  // ---- sources -------------------------------------------------------------------------------
+  // Range KPIs come from /api/logs/ai-metrics when the user may read it; otherwise all-time totals
+  // from /api/analytics/dashboard (+ agent metrics for the success rate). A 403 (permissions out of
+  // sync with the backend) falls back silently; other errors are reported.
+  const workspaceLoading = workspace.isLoading;
+  const aiAvailable = canViewAiMetrics && !aiMetrics.isError;
+  const ai = aiAvailable ? aiMetrics.data : undefined;
+  const summary = ai?.summary;
+  const windowHint = rangeLabel(days);
+  const statsLoading = workspaceLoading || stats.isLoading;
+  const aiLoading = workspaceLoading || (aiAvailable && aiMetrics.isLoading);
+  const agentsLoading = workspaceLoading || agentsQuery.isLoading;
+
+  const s = stats.data;
+  const fallbackSuccess = agentTotals.answered > 0 ? agentTotals.successful / agentTotals.answered : null;
+
+  const errors: { label: string; message: string; retry: () => void }[] = [];
+  if (stats.isError) errors.push({ label: "Account totals", message: formatUserError(stats.error), retry: () => void stats.refetch() });
+  if (canViewAiMetrics && aiMetrics.isError && !isForbidden(aiMetrics.error)) {
+    errors.push({ label: "Range metrics", message: formatUserError(aiMetrics.error), retry: () => void aiMetrics.refetch() });
+  }
+
+  const outcomes = aiAvailable
+    ? {
+        successful: summary?.success_count ?? 0,
+        failed: summary?.failed_count ?? 0,
+        sourceLabel: `${windowHint} · AI request logs`,
+        loading: aiLoading,
+      }
+    : {
+        successful: agentTotals.successful,
+        failed: agentTotals.failed,
+        sourceLabel: "All time · from agent metrics",
+        loading: agentsLoading,
+      };
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={LayoutDashboard}
-        title="Dashboard"
-        description={
-          canViewAnalytics
-            ? "Analytics overview for your account"
-            : "Account overview for your assigned account(s)"
+    <Page width="wide">
+      {heading}
+
+      {errors.length > 0 && (
+        <Alert
+          tone="danger"
+          title="Some dashboard data couldn't be loaded"
+          description={errors.map((e) => `${e.label}: ${e.message}`).join(" · ")}
+          action={
+            <Button variant="outline" size="sm" onClick={() => errors.forEach((e) => e.retry())}>
+              Try again
+            </Button>
+          }
+        />
+      )}
+
+      <StatGroup columns={4} aria-label="Key metrics">
+        <Stat
+          label="AI requests"
+          icon={<Zap />}
+          loading={aiAvailable ? aiLoading : statsLoading}
+          value={formatNumber(aiAvailable ? summary?.total_calls : s?.total_ai_requests)}
+          hint={aiAvailable ? windowHint : "All time"}
+          info={
+            aiAvailable
+              ? `LLM calls for this account in the ${windowHint.toLowerCase()}, all statuses (AI request logs).`
+              : "All AI requests ever recorded for this account (analytics totals)."
+          }
+        />
+        <Stat
+          label="Success rate"
+          icon={<Gauge />}
+          loading={aiAvailable ? aiLoading : agentsLoading}
+          value={formatPercent(aiAvailable ? summary?.success_rate : fallbackSuccess)}
+          hint={aiAvailable ? windowHint : "All time · from agent metrics"}
+          info={
+            aiAvailable
+              ? `Share of LLM calls that succeeded in the ${windowHint.toLowerCase()} (AI request logs).`
+              : "Successful answers ÷ (successful + failed answers), summed over all agents, all time."
+          }
+        />
+        <Stat
+          label="Avg response time"
+          icon={<Clock />}
+          loading={aiAvailable ? aiLoading : statsLoading}
+          value={formatDurationMs(aiAvailable ? summary?.avg_latency_ms : s?.avg_response_time_ms)}
+          hint={aiAvailable ? windowHint : "All time"}
+          info={
+            aiAvailable
+              ? `Average LLM latency per call in the ${windowHint.toLowerCase()}.`
+              : "Average AI response time over all requests for this account."
+          }
+        />
+        <Stat
+          label="AI cost"
+          icon={<Coins />}
+          loading={aiAvailable ? aiLoading : statsLoading}
+          value={formatMoney(aiAvailable ? summary?.total_cost : s?.total_cost)}
+          hint={aiAvailable ? windowHint : "All time"}
+          info="Cost of LLM calls in EGP, computed by the server with the configured markup included."
+        />
+      </StatGroup>
+
+      <StatGroup columns={5} variant="strip" aria-label="All-time totals">
+        <Stat emphasis="secondary" label="Sessions" hint="All time" loading={statsLoading} value={formatNumber(s?.total_sessions)} />
+        <Stat emphasis="secondary" label="Messages" hint="All time" loading={statsLoading} value={formatNumber(s?.total_messages)} />
+        <Stat emphasis="secondary" label="Input tokens" hint="All time" loading={statsLoading} value={formatNumber(s?.total_input_tokens)} />
+        <Stat emphasis="secondary" label="Output tokens" hint="All time" loading={statsLoading} value={formatNumber(s?.total_output_tokens)} />
+        <Stat
+          emphasis="secondary"
+          label="Escalations"
+          hint="All time · agent metrics"
+          loading={agentsLoading}
+          value={agentsQuery.isError ? "—" : formatNumber(agentTotals.escalations)}
+        />
+      </StatGroup>
+
+      <AiActivityCard
+        points={timeseries.data ?? []}
+        days={days}
+        loading={workspaceLoading || timeseries.isLoading}
+        error={
+          timeseries.isError
+            ? {
+                icon: AlertCircle,
+                title: "Couldn't load AI activity",
+                description: formatUserError(timeseries.error),
+                action: (
+                  <Button variant="outline" size="sm" onClick={() => void timeseries.refetch()}>
+                    Try again
+                  </Button>
+                ),
+              }
+            : null
         }
       />
 
-      <div className="max-w-xs">
-        <Label htmlFor="account">Account</Label>
-        <Select
-          id="account"
-          value={selectedAccountId ?? ""}
-          onChange={(e) => setAccountId(Number(e.target.value))}
-          className="mt-1"
-        >
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </Select>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-2">
+        <AnswerOutcomesCard
+          successful={outcomes.successful}
+          failed={outcomes.failed}
+          sourceLabel={outcomes.sourceLabel}
+          byModel={ai?.by_model}
+          loading={outcomes.loading}
+          error={
+            !aiAvailable && agentsQuery.isError
+              ? { icon: AlertCircle, title: "Couldn't load answer outcomes", description: formatUserError(agentsQuery.error) }
+              : null
+          }
+        />
+        {aiAvailable ? (
+          <AiCostCard
+            sourceLabel={`${windowHint} · AI request logs`}
+            cost={summary?.total_cost}
+            requests={summary?.total_calls}
+            tokens={[{ label: "Tokens", value: summary?.total_tokens }]}
+            byModel={ai?.by_model}
+            note={ai && ai.by_model.length > 0 ? "Cost isn't broken down per model; bars show each model's share of calls." : undefined}
+            loading={aiLoading}
+          />
+        ) : (
+          <AiCostCard
+            sourceLabel="All time · analytics totals"
+            cost={s?.total_cost}
+            requests={s?.total_ai_requests}
+            tokens={[
+              { label: "Input tokens", value: s?.total_input_tokens },
+              { label: "Output tokens", value: s?.total_output_tokens },
+            ]}
+            note={
+              canViewAiMetrics
+                ? "Range figures are unavailable right now, so all-time totals are shown."
+                : "Range figures and usage by model need access to Logs."
+            }
+            loading={statsLoading}
+            error={
+              stats.isError ? { icon: AlertCircle, title: "Couldn't load AI cost", description: formatUserError(stats.error) } : null
+            }
+          />
+        )}
       </div>
 
-      {!selectedAccountId ? (
-        <p className="text-sm text-muted-foreground">Select an account to continue.</p>
-      ) : canViewAnalytics ? (
-        <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <KPIStatCard label="Sessions" value={stats?.total_sessions ?? "—"} icon={<Activity className="h-4 w-4" />} iconColor="bg-blue-100 text-blue-600" />
-            <KPIStatCard label="Messages" value={stats?.total_messages ?? "—"} icon={<MessageSquare className="h-4 w-4" />} iconColor="bg-violet-100 text-violet-600" />
-            <KPIStatCard label="AI Requests" value={stats?.total_ai_requests ?? "—"} icon={<Zap className="h-4 w-4" />} iconColor="bg-amber-100 text-amber-600" />
-            <KPIStatCard label="Avg Response" value={stats?.avg_response_time_ms != null ? `${Math.round(stats.avg_response_time_ms)} ms` : "—"} icon={<Clock className="h-4 w-4" />} iconColor="bg-emerald-100 text-emerald-600" />
-            <KPIStatCard label="Input Tokens" value={stats?.total_input_tokens != null ? stats.total_input_tokens.toLocaleString() : "—"} icon={<Users className="h-4 w-4" />} iconColor="bg-sky-100 text-sky-600" />
-            <KPIStatCard label="Total Cost" value={stats?.total_cost != null ? `E£${stats.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "—"} icon={<DollarSign className="h-4 w-4" />} iconColor="bg-rose-100 text-rose-600" />
-          </div>
-
-          <OverviewCharts accountId={selectedAccountId} />
-
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-semibold">Agent Metrics</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Per-agent stats from chat sessions and AI requests (computed live).
-              </p>
-            </div>
-
-            <TableFilters
-              search={search}
-              onSearchChange={setSearch}
-              searchPlaceholder="Search by agent name, email, or user ID…"
-              filters={[
-                {
-                  id: "agent-usage-filter",
-                  label: "AI usage",
-                  value: usageFilter,
-                  onChange: setUsageFilter,
-                  options: [
-                    { value: "ALL", label: "All levels" },
-                    { value: "LOW", label: "Under 10" },
-                    { value: "MEDIUM", label: "10 – 49" },
-                    { value: "HIGH", label: "50+" },
-                  ],
-                },
-                {
-                  id: "agent-response-filter",
-                  label: "Avg response",
-                  value: responseFilter,
-                  onChange: setResponseFilter,
-                  options: [
-                    { value: "ALL", label: "All" },
-                    { value: "FAST", label: "Under 3s" },
-                    { value: "SLOW", label: "3s or more" },
-                  ],
-                },
-                {
-                  id: "agent-escalation-filter",
-                  label: "Escalations",
-                  value: escalationFilter,
-                  onChange: setEscalationFilter,
-                  options: [
-                    { value: "ALL", label: "All" },
-                    { value: "WITH", label: "With escalations" },
-                    { value: "NONE", label: "No escalations" },
-                  ],
-                },
-              ]}
-              onClear={clearAgentFilters}
-              totalCount={agents.length}
-              filteredCount={filteredAgents.length}
-            />
-
-            <DataTable<AgentMetric>
-              columns={[
-                {
-                  key: "agent",
-                  header: "Agent",
-                  sortable: true,
-                  sortValue: (r) => agentDisplayName(r),
-                  render: (r) => agentDisplayName(r),
-                },
-                { key: "ai_usage_count", header: "AI Usage", sortable: true },
-                { key: "successful_answers", header: "Successful", sortable: true },
-                { key: "escalation_count", header: "Escalations", sortable: true },
-                {
-                  key: "avg_response_time",
-                  header: "Avg Response (ms)",
-                  sortable: true,
-                  render: (r) => (r.avg_response_time != null ? Math.round(r.avg_response_time) : "—"),
-                },
-              ]}
-              data={filteredAgents}
-              keyFn={(r) => r.user_id}
-              loading={agentsLoading}
-              emptyMessage={
-                agents.length === 0
-                  ? "No agent chat activity for this account yet"
-                  : "No agents match your filters"
-              }
-            />
-          </div>
-        </>
-      ) : (
-        <p className="text-sm text-muted-foreground">Analytics are not available for your role.</p>
-      )}
-    </div>
+      <section className="space-y-3" aria-labelledby="agent-performance-heading">
+        <div>
+          <h2 id="agent-performance-heading" className="text-base font-semibold text-foreground">
+            Agent performance
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            All time, per agent: AI usage, answer outcomes and response time (computed live).
+          </p>
+        </div>
+        <AgentPerformanceTable
+          accountId={accountId}
+          agents={agents}
+          loading={agentsLoading}
+          error={agentsQuery.isError ? formatUserError(agentsQuery.error) : null}
+          onRetry={() => void agentsQuery.refetch()}
+        />
+      </section>
+    </Page>
   );
 }

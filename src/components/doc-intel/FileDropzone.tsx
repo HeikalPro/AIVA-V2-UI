@@ -1,6 +1,11 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
-import { CheckCircle2, Clock, FileText, Loader2, Upload, X, XCircle, type LucideIcon } from "lucide-react";
+import { FileText, Upload, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { DOC_MIME_TYPES, formatBytes, type FileUploadState, type UploadLimits } from "@/lib/doc-intel";
+import { Status, type StatusTone } from "@/components/data/status";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 
 type Props = {
   files: File[];
@@ -11,12 +16,12 @@ type Props = {
   fileStates?: ReadonlyMap<File, FileUploadState>;
 };
 
-const STATE_VIEW: Record<FileUploadState["status"], { icon: LucideIcon; label: string; tone: string; spin?: boolean }> = {
-  waiting: { icon: Clock, label: "Waiting", tone: "text-muted-foreground" },
-  uploading: { icon: Loader2, label: "Uploading…", tone: "text-primary", spin: true },
-  accepted: { icon: CheckCircle2, label: "Accepted", tone: "text-emerald-700" },
-  rejected: { icon: XCircle, label: "Rejected", tone: "text-red-700" },
-  failed: { icon: XCircle, label: "Upload failed", tone: "text-red-700" },
+const STATE_VIEW: Record<FileUploadState["status"], { tone: StatusTone; label: string; pulse?: boolean }> = {
+  waiting: { tone: "neutral", label: "Waiting" },
+  uploading: { tone: "warning", label: "Uploading", pulse: true },
+  accepted: { tone: "success", label: "Accepted" },
+  rejected: { tone: "danger", label: "Rejected" },
+  failed: { tone: "danger", label: "Upload failed" },
 };
 
 function extensionOf(name: string): string {
@@ -120,15 +125,19 @@ export function FileDropzone({ files, onChange, limits, disabled = false, fileSt
         onDrop={handleDrop}
         aria-disabled={disabled || undefined}
         aria-describedby={hintId}
-        className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+        className={cn(
+          "flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-6 text-center transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           disabled
-            ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
+            ? "cursor-not-allowed border-input bg-surface-muted opacity-60"
             : dragActive
-              ? "border-primary bg-primary/10"
-              : "border-border bg-muted/40 hover:border-primary/50 hover:bg-primary/5"
-        }`}
+              ? "border-primary bg-primary-muted"
+              : "border-input bg-surface-muted hover:border-primary/60 hover:bg-primary-muted/50",
+        )}
       >
-        <Upload aria-hidden="true" className="h-6 w-6 text-primary" />
+        <span aria-hidden="true" className="mb-1 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-primary">
+          <Upload className="h-4 w-4" />
+        </span>
         <span className="text-sm font-medium text-foreground">
           Drop files here or <span className="text-primary underline underline-offset-2">browse</span>
         </span>
@@ -151,63 +160,58 @@ export function FileDropzone({ files, onChange, limits, disabled = false, fileSt
       />
 
       {problems.length > 0 && (
-        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <p className="font-medium">Some files were not added:</p>
-          <ul className="mt-1 list-inside list-disc space-y-0.5 break-words">
+        <Alert tone="warning" role="alert" title="Some files were not added">
+          <ul className="mt-0.5 list-inside list-disc space-y-0.5 text-ui">
             {problems.map((message, i) => (
-              <li key={i}>{message}</li>
+              <li key={i} className="[overflow-wrap:anywhere]">
+                {message}
+              </li>
             ))}
           </ul>
-        </div>
+        </Alert>
       )}
 
       {files.length > 0 && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>
+            <span className="tabular-nums">
               {files.length} {files.length === 1 ? "file" : "files"} · {formatBytes(totalBytes)}
             </span>
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              disabled={disabled}
-              className="rounded text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            >
+            <Button variant="link" size="sm" className="h-6 px-0 text-xs" onClick={() => onChange([])} disabled={disabled}>
               Remove all
-            </button>
+            </Button>
           </div>
-          <ul aria-label="Selected files" className="divide-y divide-border rounded-lg border border-border">
+          <ul aria-label="Selected files" className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
             {files.map((file) => {
               const state = fileStates?.get(file);
               const view = state ? STATE_VIEW[state.status] : null;
-              const Icon = view ? view.icon : FileText;
               return (
-                <li key={fileKey(file)} className="flex items-start gap-3 px-3 py-2 text-sm">
-                  <Icon
-                    aria-hidden="true"
-                    className={`mt-0.5 h-4 w-4 shrink-0 ${view ? view.tone : "text-muted-foreground"} ${view?.spin ? "animate-spin" : ""}`}
-                  />
+                <li key={fileKey(file)} className="flex items-start gap-3 px-3 py-2">
+                  <FileText aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-foreground" title={file.name}>
-                      {file.name}
+                    <p className="truncate text-ui text-foreground" title={file.name}>
+                      <bdi>{file.name}</bdi>
                     </p>
                     {state && view && (
-                      <p className={`break-words text-xs ${view.tone}`}>
-                        {view.label}
-                        {"reason" in state ? `: ${state.reason}` : ""}
-                      </p>
+                      <div className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-2">
+                        <Status tone={view.tone} label={view.label} pulse={view.pulse} className="text-xs" />
+                        {"reason" in state && (
+                          <span className="min-w-0 break-words text-xs text-danger" dir="auto">
+                            {state.reason}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                   <span className="mt-0.5 shrink-0 text-xs tabular-nums text-muted-foreground">{formatBytes(file.size)}</span>
-                  <button
-                    type="button"
+                  <IconButton
+                    label={`Remove ${file.name}`}
+                    icon={X}
+                    size="sm"
+                    className="-my-1 h-7 w-7"
                     onClick={() => removeFile(file)}
                     disabled={disabled}
-                    aria-label={`Remove ${file.name}`}
-                    className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                  >
-                    <X aria-hidden="true" className="h-4 w-4" />
-                  </button>
+                  />
                 </li>
               );
             })}

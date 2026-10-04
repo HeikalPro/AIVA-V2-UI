@@ -7,11 +7,12 @@ import {
   type ReactNode,
 } from "react";
 
-type Theme = "light" | "dark";
+export type Theme = "light" | "dark";
 
 type ThemeContextValue = {
   theme: Theme;
   toggleTheme: () => void;
+  setTheme: (theme: Theme) => void;
 };
 
 const STORAGE_KEY = "aiva-theme";
@@ -29,7 +30,7 @@ function getInitialTheme(): Theme {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -41,10 +42,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((current) => (current === "dark" ? "light" : "dark"));
+    setThemeState((current) => (current === "dark" ? "light" : "dark"));
   }, []);
 
-  return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+  }, []);
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>{children}</ThemeContext.Provider>
+  );
 }
 
 export function useTheme() {

@@ -1,57 +1,77 @@
 import { useMemo, useState } from "react";
-import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Lock, MessageSquareText, ThumbsUp } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { canAccessPermission } from "@/lib/roles";
+import { ROLES, canAccessPermission } from "@/lib/roles";
 import { useMessageRatings } from "@/hooks/useMessageRatings";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable, type Column } from "@/components/shared/DataTable";
-import { Badge } from "@/components/ui/badge";
-import { TableFilters } from "@/components/shared/TableFilters";
 import { filterRows } from "@/lib/table-filters";
+import { formatUserError } from "@/lib/errors";
+import { formatNumber, formatPercent } from "@/lib/format";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, type Column } from "@/components/data/data-table";
+import { EmptyState } from "@/components/data/empty-state";
+import { FilterBar, type DateRangeValue } from "@/components/data/filter-bar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
+import { QueueChips } from "@/components/doc-intel/QueueChips";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
+import { FeedbackReviewSheet, RatingLabel, agentLabel } from "@/components/feedback/FeedbackReviewSheet";
 import type { MessageRating } from "@/types/api";
 
-function agentLabel(row: MessageRating): string {
-  const name = [row.agent_first_name, row.agent_last_name].filter(Boolean).join(" ").trim();
-  if (name) return name;
-  return row.agent_email ?? `Agent #${row.agent_user_id}`;
+/** Local calendar day (YYYY-MM-DD) of a timestamp, to compare with the date filter. */
+function localDay(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function snippet(text: string, max = 120): string {
-  const t = text.replace(/\s+/g, " ").trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
+function sortedOptions(entries: Map<string, string>, allLabel = "All") {
+  return [
+    { value: "ALL", label: allLabel },
+    ...[...entries.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label })),
+  ];
 }
 
 export function MessageRatingsPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const canView = user ? canAccessPermission(user, "message-ratings") : false;
-  const { data = [], isLoading } = useMessageRatings(canView);
+  const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
+  const canLoadQuestion = user != null && (canAccessPermission(user, "chat") || isSuperAdmin);
+  const { data = [], isLoading, isError, error, refetch } = useMessageRatings(canView);
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [ratingFilter, setRatingFilter] = useState("ALL");
   const [accountFilter, setAccountFilter] = useState("ALL");
+  const [agentFilter, setAgentFilter] = useState("ALL");
+  const [queueFilter, setQueueFilter] = useState("ALL");
+  const [dateRange, setDateRange] = useState<DateRangeValue>({ from: "", to: "" });
+  const [selected, setSelected] = useState<MessageRating | null>(null);
 
   const accountOptions = useMemo(() => {
-    const byId = new Map<number, string>();
-    for (const r of data) {
-      if (!byId.has(r.account_id)) {
-        byId.set(r.account_id, r.account_name ?? `Account #${r.account_id}`);
-      }
-    }
-    return [
-      { value: "ALL", label: "All accounts" },
-      ...[...byId.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([id, name]) => ({ value: String(id), label: name })),
-    ];
+    const byId = new Map<string, string>();
+    for (const r of data) if (!byId.has(String(r.account_id))) byId.set(String(r.account_id), r.account_name ?? `Account #${r.account_id}`);
+    return sortedOptions(byId);
+  }, [data]);
+
+  const agentOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const r of data) if (!byId.has(String(r.agent_user_id))) byId.set(String(r.agent_user_id), agentLabel(r));
+    return sortedOptions(byId);
+  }, [data]);
+
+  const queueOptions = useMemo(() => {
+    const keys = new Map<string, string>();
+    for (const r of data) for (const q of r.active_queues) keys.set(q, q);
+    return [...sortedOptions(keys), { value: "__ALL_QUEUES__", label: "Not narrowed" }];
   }, [data]);
 
   const filtered = useMemo(
     () =>
       filterRows(
-        data
-          .filter((r) => ratingFilter === "ALL" || r.rating === ratingFilter)
-          .filter((r) => accountFilter === "ALL" || String(r.account_id) === accountFilter),
+        data,
         search,
         (r) =>
           [
@@ -63,150 +83,214 @@ export function MessageRatingsPage() {
             r.feedback ?? "",
             ...r.active_queues,
           ].join(" "),
+        [
+          (r) => ratingFilter === "ALL" || r.rating === ratingFilter,
+          (r) => accountFilter === "ALL" || String(r.account_id) === accountFilter,
+          (r) => agentFilter === "ALL" || String(r.agent_user_id) === agentFilter,
+          (r) =>
+            queueFilter === "ALL" ||
+            (queueFilter === "__ALL_QUEUES__" ? r.active_queues.length === 0 : r.active_queues.includes(queueFilter)),
+          (r) => {
+            if (!dateRange.from && !dateRange.to) return true;
+            const day = localDay(r.rated_at);
+            if (!day) return false;
+            return (!dateRange.from || day >= dateRange.from) && (!dateRange.to || day <= dateRange.to);
+          },
+        ],
       ),
-    [data, ratingFilter, accountFilter, search],
+    [data, ratingFilter, accountFilter, agentFilter, queueFilter, dateRange, search],
   );
+
+  function clearFilters() {
+    setSearch("");
+    setRatingFilter("ALL");
+    setAccountFilter("ALL");
+    setAgentFilter("ALL");
+    setQueueFilter("ALL");
+    setDateRange({ from: "", to: "" });
+  }
+
+  const helpful = useMemo(() => filtered.filter((r) => r.rating === "up").length, [filtered]);
 
   const columns: Column<MessageRating>[] = [
     {
-      key: "rated_at",
-      header: "Rated",
-      sortable: true,
-      sortValue: (r) => r.rated_at ?? "",
-      render: (r) => (r.rated_at ? new Date(r.rated_at).toLocaleString() : "—"),
-    },
-    {
       key: "rating",
       header: "Rating",
-      render: (r) =>
-        r.rating === "up" ? (
-          <span className="inline-flex items-center gap-1 text-emerald-700">
-            <ThumbsUp className="h-3.5 w-3.5" /> Helpful
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-rose-700">
-            <ThumbsDown className="h-3.5 w-3.5" /> Not helpful
-          </span>
-        ),
+      sortable: true,
+      render: (r) => <RatingLabel rating={r.rating} />,
     },
     {
       key: "agent",
       header: "Agent",
       sortable: true,
-      sortValue: (r) => agentLabel(r),
+      sortValue: (r) => agentLabel(r).toLowerCase(),
       render: (r) => (
-        <div>
-          <div className="font-medium text-slate-900">{agentLabel(r)}</div>
-          {r.agent_email && <div className="text-xs text-slate-500">{r.agent_email}</div>}
+        <div className="min-w-0 max-w-[14rem]">
+          <p className="truncate font-medium text-foreground" title={agentLabel(r)}>
+            <bdi>{agentLabel(r)}</bdi>
+          </p>
+          {r.agent_email && r.agent_email !== agentLabel(r) && <p className="truncate text-xs text-muted-foreground">{r.agent_email}</p>}
         </div>
       ),
-    },
-    {
-      key: "organization",
-      header: "Organization",
-      sortable: true,
-      sortValue: (r) => r.organization_name ?? "",
-      render: (r) => r.organization_name ?? `Org #${r.organization_id}`,
     },
     {
       key: "account",
       header: "Account",
       sortable: true,
       sortValue: (r) => r.account_name ?? "",
-      render: (r) => r.account_name ?? `Account #${r.account_id}`,
+      truncate: true,
+      maxWidth: "11rem",
+      render: (r) => <bdi>{r.account_name ?? `Account #${r.account_id}`}</bdi>,
     },
     {
       key: "queues",
-      header: "Queues in chat",
+      header: "Queues",
       render: (r) =>
         r.active_queues.length ? (
-          <div className="flex flex-wrap gap-1">
-            {r.active_queues.map((q) => (
-              <Badge key={q} variant="default">
-                {q}
-              </Badge>
-            ))}
-          </div>
+          <QueueChips queues={r.active_queues.map((q) => ({ key: q, label: q }))} />
         ) : (
-          <Badge variant="muted" title="Agent had not narrowed the search — all allowed queues were active">
-            All queues
-          </Badge>
+          <Tooltip content="The agent had not narrowed the search: all allowed queues were active">
+            <Badge variant="outline" tabIndex={0}>
+              All queues
+            </Badge>
+          </Tooltip>
         ),
+    },
+    {
+      key: "rated_at",
+      header: "Rated",
+      sortable: true,
+      sortValue: (r) => r.rated_at ?? "",
+      render: (r) => <RelativeTime value={r.rated_at} />,
     },
     {
       key: "message",
       header: "Answer",
-      render: (r) => <span title={r.message_text}>{snippet(r.message_text)}</span>,
+      truncate: true,
+      maxWidth: "26rem",
+      cellTitle: (r) => r.message_text,
+      render: (r) => <span dir="auto">{r.message_text.replace(/\s+/g, " ").trim()}</span>,
     },
     {
       key: "feedback",
-      header: "Feedback",
+      header: <span className="sr-only">Comment</span>,
+      label: "Comment",
+      align: "center",
+      width: 64,
       render: (r) =>
         r.feedback?.trim() ? (
-          <span className="text-sm text-slate-700" title={r.feedback}>
-            {snippet(r.feedback, 80)}
-          </span>
+          <Tooltip content={<span dir="auto" className="block max-w-xs whitespace-pre-wrap">{r.feedback}</span>}>
+            <span
+              tabIndex={0}
+              aria-label={`Comment: ${r.feedback}`}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <MessageSquareText aria-hidden="true" className="h-4 w-4" />
+            </span>
+          </Tooltip>
         ) : (
-          <span className="text-slate-400">—</span>
+          <span className="text-subtle-foreground" aria-label="No comment">
+            —
+          </span>
         ),
     },
   ];
 
   if (!canView) {
     return (
-      <div>
-        <PageHeader icon={ThumbsUp} title="Message feedback" description="Access required." />
-        <p className="text-sm text-slate-600">You do not have access to this page.</p>
-      </div>
+      <Page width="wide">
+        <PageHeading title="Message Feedback" />
+        <EmptyState icon={Lock} title="You don't have access to message feedback" description="Ask an administrator for access." />
+      </Page>
     );
   }
 
+  const isFiltered =
+    search.trim() !== "" ||
+    ratingFilter !== "ALL" ||
+    accountFilter !== "ALL" ||
+    agentFilter !== "ALL" ||
+    queueFilter !== "ALL" ||
+    Boolean(dateRange.from || dateRange.to);
+
   return (
-    <div>
-      <PageHeader
-        icon={ThumbsUp}
-        title="Message feedback"
-        description="Thumbs up/down ratings submitted by agents from the desktop widget."
+    <Page width="wide">
+      <PageHeading
+        title="Message Feedback"
+        description="Thumbs up / down ratings agents gave AI answers in the desktop widget. Open a row to review the answer."
+        meta={
+          !isLoading && data.length > 0 ? (
+            <span>
+              {filtered.length > 0 ? `${formatPercent(helpful / filtered.length, 0)} helpful` : "—"} · {formatNumber(filtered.length)} ratings
+            </span>
+          ) : undefined
+        }
       />
-      <TableFilters
-        search={search}
-        onSearchChange={setSearch}
-        searchPlaceholder="Search agent, account, message, feedback…"
-        totalCount={data.length}
-        filteredCount={filtered.length}
-        onClear={() => {
-          setSearch("");
-          setRatingFilter("ALL");
-          setAccountFilter("ALL");
-        }}
-        filters={[
-          {
-            id: "account",
-            label: "Account",
-            value: accountFilter,
-            onChange: setAccountFilter,
-            options: accountOptions,
-          },
-          {
-            id: "rating",
-            label: "Rating",
-            value: ratingFilter,
-            onChange: setRatingFilter,
-            options: [
-              { value: "ALL", label: "All ratings" },
-              { value: "up", label: "Helpful" },
-              { value: "down", label: "Not helpful" },
-            ],
-          },
-        ]}
-      />
-      <DataTable
+
+      <DataTable<MessageRating>
+        aria-label="Message feedback"
         columns={columns}
-        data={filtered}
+        data={isError ? [] : filtered}
         keyFn={(r) => r.message_id}
         loading={isLoading}
-        emptyMessage="No message ratings yet."
+        itemLabel="ratings"
+        defaultSort={{ key: "rated_at", dir: "desc" }}
+        onRowClick={(r) => setSelected(r)}
+        rowLabel={(r) => `${agentLabel(r)} rating`}
+        empty={
+          isError
+            ? {
+                title: "Couldn't load message feedback",
+                description: formatUserError(error),
+                action: (
+                  <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                    Try again
+                  </Button>
+                ),
+              }
+            : isFiltered
+              ? {
+                  title: "No ratings match these filters",
+                  action: (
+                    <Button variant="outline" size="sm" onClick={clearFilters}>
+                      Clear filters
+                    </Button>
+                  ),
+                }
+              : { icon: ThumbsUp, title: "No message ratings yet", description: "Ratings appear when agents rate AI answers in the widget." }
+        }
+        toolbar={
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search ratings…"
+            filters={[
+              {
+                id: "rating",
+                label: "Rating",
+                value: ratingFilter,
+                onChange: setRatingFilter,
+                options: [
+                  { value: "ALL", label: "All" },
+                  { value: "up", label: "Helpful" },
+                  { value: "down", label: "Not helpful" },
+                ],
+              },
+              { id: "account", label: "Account", value: accountFilter, onChange: setAccountFilter, options: accountOptions },
+              { id: "agent", label: "Agent", value: agentFilter, onChange: setAgentFilter, options: agentOptions, className: "max-w-[16rem]" },
+              { id: "queue", label: "Queue", value: queueFilter, onChange: setQueueFilter, options: queueOptions },
+            ]}
+            dateRange={{ ...dateRange, onChange: setDateRange, presets: true, label: "Rated" }}
+            onClear={clearFilters}
+            isFiltered={isFiltered}
+            totalCount={isFiltered ? data.length : undefined}
+            filteredCount={filtered.length}
+            itemLabel="ratings"
+          />
+        }
       />
-    </div>
+
+      <FeedbackReviewSheet rating={selected} canLoadQuestion={canLoadQuestion} onClose={() => setSelected(null)} />
+    </Page>
   );
 }

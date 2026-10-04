@@ -1,9 +1,10 @@
 import { type FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
-import { AuthShell } from "@/components/auth/AuthShell";
+import { AuthShell, authLinkClass } from "@/components/auth/AuthShell";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { forgotPassword, setVerifyEmail } from "@/lib/auth-api";
 import { formatUserError } from "@/lib/errors";
 
@@ -31,26 +32,23 @@ export function ForgotPasswordPage() {
   return (
     <AuthShell title="Forgot password" subtitle="We'll email you a reset code if an account exists.">
       {submitted ? (
-        <div className="space-y-5">
-          <p className="text-center text-sm text-slate-600">
-            If an account exists for this email, you will receive password reset instructions.
-          </p>
-          <Link
-            to="/reset-password"
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-[#004080] text-sm font-semibold text-white hover:bg-[#003060]"
-          >
-            Enter reset code
-          </Link>
-          <p className="text-center text-sm text-slate-500">
-            <Link to="/login" className="font-medium text-slate-800 hover:underline">
+        <div className="space-y-4">
+          <Alert
+            tone="info"
+            description="If an account exists for this email, you will receive password reset instructions."
+          />
+          <Button asChild size="lg" className="w-full">
+            <Link to="/reset-password">Enter reset code</Link>
+          </Button>
+          <p className="pt-1 text-center text-sm">
+            <Link to="/login" className={authLinkClass}>
               Back to sign in
             </Link>
           </p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Field label="Email">
             <Input
               id="email"
               type="email"
@@ -59,19 +57,14 @@ export function ForgotPasswordPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoFocus
-              className="h-11 rounded-xl border-slate-200 bg-slate-50 focus:bg-white"
             />
-          </div>
-          {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700" role="alert">
-              {error}
-            </div>
-          )}
-          <Button type="submit" className="h-11 w-full rounded-xl text-sm font-semibold" disabled={loading}>
+          </Field>
+          {error && <Alert tone="danger" description={error} />}
+          <Button type="submit" size="lg" className="w-full" loading={loading}>
             {loading ? "Sending..." : "Send reset instructions"}
           </Button>
-          <p className="text-center text-sm text-slate-500">
-            <Link to="/login" className="font-medium text-slate-800 hover:underline">
+          <p className="pt-1 text-center text-sm">
+            <Link to="/login" className={authLinkClass}>
               Back to sign in
             </Link>
           </p>

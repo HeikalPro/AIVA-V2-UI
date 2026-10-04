@@ -1,7 +1,15 @@
 import type { ReactNode } from "react";
-import { Cpu, HardDrive, MemoryStick, Network, Activity, Gauge, Info, Database } from "lucide-react";
+import { Activity, Cpu, Gauge, HardDrive, Info, MemoryStick, Network, type LucideIcon } from "lucide-react";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import { useSystemResources } from "@/hooks/useSystemHealth";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AutoRefreshIndicator } from "./AutoRefreshIndicator";
 import type { SystemResources } from "@/types/api";
+
+/** Display only: mirrors HEALTH_REFETCH_MS in hooks/useSystemHealth. */
+const RESOURCES_REFRESH_MS = 5_000;
 
 /* ---------- formatting ---------- */
 
@@ -17,9 +25,6 @@ function gb(v: number | null | undefined): string {
 function rate(mbps: number | null | undefined): string {
   return mbps == null ? "—" : `${mbps.toFixed(2)} MB/s`;
 }
-function count(v: number | null | undefined): string {
-  return v == null ? "—" : v.toLocaleString();
-}
 function fmtUptime(seconds: number | null | undefined): string {
   if (seconds == null) return "—";
   const d = Math.floor(seconds / 86400);
@@ -28,93 +33,124 @@ function fmtUptime(seconds: number | null | undefined): string {
   return `${d}d ${h}h ${m}m`;
 }
 
-type Tone = "good" | "warn" | "critical";
-function usageTone(percent: number | null | undefined): Tone {
-  if (percent == null) return "good";
-  if (percent >= 90) return "critical";
-  if (percent >= 75) return "warn";
-  return "good";
+/** Calm by default; amber from 75 %, red from 90 %. */
+function usageTone(percent: number | null | undefined): "primary" | "warning" | "danger" {
+  if (percent == null) return "primary";
+  if (percent >= 90) return "danger";
+  if (percent >= 75) return "warning";
+  return "primary";
 }
-const BAR_TONE: Record<Tone, string> = {
-  good: "bg-emerald-500",
-  warn: "bg-amber-500",
-  critical: "bg-red-500",
-};
 
-/* ---------- primitives ---------- */
+/* ---------- pieces ---------- */
 
-function Bar({ percent }: { percent: number | null | undefined }) {
-  const p = percent ?? 0;
+function UsageCard({
+  icon: Icon,
+  label,
+  value,
+  percent,
+  hint,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  percent?: number | null;
+  hint?: string;
+}) {
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200/70">
-      <div className={`h-full rounded-full ${BAR_TONE[usageTone(percent)]}`} style={{ width: `${Math.min(100, Math.max(1, p))}%` }} />
-    </div>
+    <Card className="min-w-0 px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
+        <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-subtle-foreground" />
+      </div>
+      <p className="mt-1 truncate text-lg font-semibold leading-7 tabular-nums text-foreground">{value}</p>
+      {percent !== undefined && <Progress value={percent ?? null} tone={usageTone(percent)} size="sm" label={`${label} usage`} className="mt-1.5" />}
+      {hint && <p className="mt-1.5 truncate text-xs text-muted-foreground">{hint}</p>}
+    </Card>
   );
 }
 
-function Card({ title, subtitle, icon, right, children }: { title: string; subtitle?: string; icon?: ReactNode; right?: ReactNode; children: ReactNode }) {
+function Panel({ icon: Icon, title, subtitle, right, children }: { icon: LucideIcon; title: string; subtitle?: string; right?: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <Card className="min-w-0 p-4">
       <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            {icon}
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Icon aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
             {title}
-          </div>
-          {subtitle ? <p className="text-xs text-muted-foreground">{subtitle}</p> : null}
+          </h3>
+          {subtitle ? <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p> : null}
         </div>
         {right}
       </div>
       {children}
-    </div>
+    </Card>
   );
 }
 
-function StatRow({ label, value }: { label: string; value: ReactNode }) {
+function MetricList({ rows }: { rows: { label: string; value: ReactNode }[] }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 py-2 text-sm last:border-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium tabular-nums text-foreground">{value}</span>
-    </div>
-  );
-}
-
-function KpiCard({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-5 py-4">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-        {icon}
-        {label}
-      </div>
-      <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{value}</p>
-      {sub ? <p className="text-xs text-muted-foreground">{sub}</p> : null}
-    </div>
-  );
-}
-
-function TriColumn({ items }: { items: { label: string; value: string }[] }) {
-  return (
-    <div className="grid grid-cols-3 gap-2 text-center">
-      {items.map((it) => (
-        <div key={it.label}>
-          <p className="text-sm font-semibold tabular-nums text-foreground">{it.value}</p>
-          <p className="text-xs text-muted-foreground">{it.label}</p>
+    <dl className="divide-y divide-border">
+      {rows.map((r) => (
+        <div key={r.label} className="flex items-center justify-between gap-3 py-1.5 text-ui">
+          <dt className="text-muted-foreground">{r.label}</dt>
+          <dd className="min-w-0 truncate text-right font-medium tabular-nums text-foreground">{r.value}</dd>
         </div>
       ))}
+    </dl>
+  );
+}
+
+function UsageBlock({ label, percent, items }: { label: string; percent: number | null | undefined; items: { label: string; value: string }[] }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-ui font-medium text-foreground">
+        <span>{label}</span>
+        <span className="tabular-nums text-muted-foreground">{pct(percent)}</span>
+      </div>
+      <Progress value={percent ?? null} tone={usageTone(percent)} label={`${label} usage`} />
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {items.map((it) => (
+          <div key={it.label}>
+            <p className="text-ui font-semibold tabular-nums text-foreground">{it.value}</p>
+            <p className="text-xs text-muted-foreground">{it.label}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 /* ---------- section ---------- */
 
+/** Host resources of the backend server (CPU, memory, disk, I/O, network), refreshed every 5 s. */
 export function SystemResourcesSection() {
-  const { data, isLoading } = useSystemResources();
+  const { data, isLoading, isFetching } = useSystemResources();
+
+  const heading = (subtitle?: string) => (
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Resources</h2>
+        {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
+      </div>
+      <AutoRefreshIndicator intervalMs={RESOURCES_REFRESH_MS} fetching={isFetching} />
+    </div>
+  );
 
   if (isLoading && !data) {
     return (
-      <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-        Loading system resources…
-      </div>
+      <section className="space-y-3" aria-busy="true">
+        {heading()}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-[92px]" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => (
+            <Skeleton key={i} className="h-56" />
+          ))}
+        </div>
+      </section>
     );
   }
   if (!data) return null;
@@ -123,101 +159,84 @@ export function SystemResourcesSection() {
   const { platform, cpu, memory, swap, disk, disk_io: io, network: net, process: proc } = r;
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">System Resources</h2>
-          <p className="text-xs text-muted-foreground">
-            {platform.app_name} · {platform.os ?? "—"} · Python {platform.python_version ?? "—"}
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
-          Live metrics — updates every 5s
-        </span>
-      </div>
+    <section className="space-y-3">
+      {heading(`${platform.app_name} · ${platform.os ?? "—"} · Python ${platform.python_version ?? "—"}`)}
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          icon={<Cpu className="h-3.5 w-3.5" />}
-          label="CPU Usage"
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <UsageCard
+          icon={Cpu}
+          label="CPU"
           value={pct(cpu.percent)}
-          sub={cpu.cores != null ? `${cpu.cores} cores${cpu.freq_mhz ? ` @ ${cpu.freq_mhz} MHz` : ""}` : undefined}
+          percent={cpu.percent}
+          hint={cpu.cores != null ? `${cpu.cores} cores${cpu.freq_mhz ? ` @ ${formatNumber(cpu.freq_mhz)} MHz` : ""}` : undefined}
         />
-        <KpiCard
-          icon={<MemoryStick className="h-3.5 w-3.5" />}
+        <UsageCard
+          icon={MemoryStick}
           label="Memory"
           value={`${gbFromMb(memory.used_mb)} / ${gbFromMb(memory.total_mb)}`.replace(/ GB \//, " /")}
-          sub={memory.percent != null ? `${memory.percent}% used` : undefined}
+          percent={memory.percent}
+          hint={memory.percent != null ? `${pct(memory.percent)} used` : undefined}
         />
-        <KpiCard
-          icon={<HardDrive className="h-3.5 w-3.5" />}
+        <UsageCard
+          icon={HardDrive}
           label="Disk"
           value={`${gb(disk.used_gb)} / ${gb(disk.total_gb)}`.replace(/ GB \//, " /")}
-          sub={disk.percent != null ? `${disk.percent}% used` : undefined}
+          percent={disk.percent}
+          hint={disk.percent != null ? `${pct(disk.percent)} used` : undefined}
         />
-        <KpiCard
-          icon={<Activity className="h-3.5 w-3.5" />}
-          label="Backend Process"
-          value={proc.memory_mb != null ? `${proc.memory_mb} MB` : "—"}
-          sub={proc.pid != null ? `PID ${proc.pid} · ${proc.num_threads ?? "?"} threads · ${pct(proc.cpu_percent)} CPU` : undefined}
+        <UsageCard
+          icon={Activity}
+          label="Backend process"
+          value={proc.memory_mb != null ? `${formatNumber(proc.memory_mb)} MB` : "—"}
+          hint={proc.pid != null ? `PID ${proc.pid} · ${proc.num_threads ?? "?"} threads · ${pct(proc.cpu_percent)} CPU` : undefined}
         />
       </div>
 
-      {/* Row: CPU · Memory & Disk · Advanced Memory */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card icon={<Cpu className="h-4 w-4 text-muted-foreground" />} title="CPU" subtitle="Overall load & per-core" right={<span className="text-sm font-semibold tabular-nums">{pct(cpu.percent)}</span>}>
-          <Bar percent={cpu.percent} />
-          <div className="mt-3 rounded-lg border border-slate-200 p-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">CPU time (system)</p>
-            <StatRow label="User" value={pct(cpu.times.user)} />
-            <StatRow label="System" value={pct(cpu.times.system)} />
-            <StatRow label="Idle" value={pct(cpu.times.idle)} />
-            <StatRow label="I/O wait" value={pct(cpu.times.iowait)} />
-          </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <Panel icon={Cpu} title="CPU" subtitle="Overall load and per core" right={<span className="text-sm font-semibold tabular-nums">{pct(cpu.percent)}</span>}>
+          <Progress value={cpu.percent ?? null} tone={usageTone(cpu.percent)} label="CPU usage" />
           {cpu.per_core.length > 0 && (
-            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4">
               {cpu.per_core.map((c, i) => (
-                <div key={i}>
+                <div key={i} className="space-y-1">
                   <div className="flex justify-between text-xs text-muted-foreground">
                     <span>Core {i}</span>
                     <span className="tabular-nums">{pct(c)}</span>
                   </div>
-                  <Bar percent={c} />
+                  <Progress value={c} tone={usageTone(c)} size="sm" label={`Core ${i} usage`} />
                 </div>
               ))}
             </div>
           )}
-          {cpu.load_avg ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Load avg: {cpu.load_avg.map((x) => x.toFixed(2)).join(" / ")}
-            </p>
-          ) : null}
-        </Card>
-
-        <Card icon={<Database className="h-4 w-4 text-muted-foreground" />} title="Memory & Disk" subtitle="RAM and primary volume">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm font-medium">
-              <span>Memory</span>
-              <span className="tabular-nums text-muted-foreground">{pct(memory.percent)}</span>
-            </div>
-            <Bar percent={memory.percent} />
-            <TriColumn
-              items={[
-                { label: "Used", value: gbFromMb(memory.used_mb) },
-                { label: "Avail.", value: gbFromMb(memory.available_mb) },
-                { label: "Total", value: gbFromMb(memory.total_mb) },
+          <div className="mt-3 border-t border-border pt-2">
+            <MetricList
+              rows={[
+                { label: "User time", value: pct(cpu.times.user) },
+                { label: "System time", value: pct(cpu.times.system) },
+                { label: "Idle", value: pct(cpu.times.idle) },
+                { label: "I/O wait", value: pct(cpu.times.iowait) },
               ]}
             />
           </div>
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center justify-between text-sm font-medium">
-              <span>Disk</span>
-              <span className="tabular-nums text-muted-foreground">{pct(disk.percent)}</span>
-            </div>
-            <Bar percent={disk.percent} />
-            <TriColumn
+          {cpu.load_avg ? (
+            <p className="mt-2 text-xs text-muted-foreground">Load average: {cpu.load_avg.map((x) => x.toFixed(2)).join(" / ")}</p>
+          ) : null}
+        </Panel>
+
+        <Panel icon={HardDrive} title="Memory and disk" subtitle="RAM and primary volume">
+          <div className="space-y-5">
+            <UsageBlock
+              label="Memory"
+              percent={memory.percent}
+              items={[
+                { label: "Used", value: gbFromMb(memory.used_mb) },
+                { label: "Available", value: gbFromMb(memory.available_mb) },
+                { label: "Total", value: gbFromMb(memory.total_mb) },
+              ]}
+            />
+            <UsageBlock
+              label="Disk"
+              percent={disk.percent}
               items={[
                 { label: "Used", value: gb(disk.used_gb) },
                 { label: "Free", value: gb(disk.free_gb) },
@@ -225,47 +244,63 @@ export function SystemResourcesSection() {
               ]}
             />
           </div>
-        </Card>
+        </Panel>
 
-        <Card icon={<MemoryStick className="h-4 w-4 text-muted-foreground" />} title="Advanced Memory" subtitle="Cache, buffers & swap">
-          <StatRow label="Available RAM" value={gbFromMb(memory.available_mb)} />
-          <StatRow label="Cached" value={memory.cached_mb != null ? gbFromMb(memory.cached_mb) : "—"} />
-          <StatRow label="Buffers" value={memory.buffers_mb != null ? gbFromMb(memory.buffers_mb) : "—"} />
-          <p className="mt-3 text-xs text-muted-foreground">
-            {swap ? `Swap: ${gbFromMb(swap.used_mb)} / ${gbFromMb(swap.total_mb)} (${pct(swap.percent)})` : "No swap configured (or 0 GB)."}
-          </p>
-        </Card>
+        <Panel icon={MemoryStick} title="Advanced memory" subtitle="Cache, buffers and swap">
+          <MetricList
+            rows={[
+              { label: "Available RAM", value: gbFromMb(memory.available_mb) },
+              { label: "Cached", value: memory.cached_mb != null ? gbFromMb(memory.cached_mb) : "—" },
+              { label: "Buffers", value: memory.buffers_mb != null ? gbFromMb(memory.buffers_mb) : "—" },
+              { label: "Swap", value: swap ? `${gbFromMb(swap.used_mb)} / ${gbFromMb(swap.total_mb)} (${pct(swap.percent)})` : "None" },
+            ]}
+          />
+          {swap && <Progress value={swap.percent ?? null} tone={usageTone(swap.percent)} size="sm" label="Swap usage" className="mt-2" />}
+        </Panel>
       </div>
 
-      {/* Row: Disk I/O · Network · System info */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card icon={<Gauge className="h-4 w-4 text-muted-foreground" />} title="Disk I/O" subtitle="Instantaneous read/write rates">
-          <StatRow label="Read speed" value={rate(io.read_mbps)} />
-          <StatRow label="Write speed" value={rate(io.write_mbps)} />
-          <StatRow label="Read IOPS" value={io.read_iops != null ? `${io.read_iops}/s` : "—"} />
-          <StatRow label="Write IOPS" value={io.write_iops != null ? `${io.write_iops}/s` : "—"} />
-          <p className="mt-3 text-xs text-muted-foreground">
-            Cumulative: {count(io.read_total)} read · {count(io.write_total)} write (bytes)
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <Panel icon={Gauge} title="Disk I/O" subtitle="Instantaneous read and write rates">
+          <MetricList
+            rows={[
+              { label: "Read speed", value: rate(io.read_mbps) },
+              { label: "Write speed", value: rate(io.write_mbps) },
+              { label: "Read IOPS", value: io.read_iops != null ? `${formatNumber(io.read_iops)}/s` : "—" },
+              { label: "Write IOPS", value: io.write_iops != null ? `${formatNumber(io.write_iops)}/s` : "—" },
+            ]}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Cumulative: {formatNumber(io.read_total)} read · {formatNumber(io.write_total)} write (bytes)
           </p>
-        </Card>
+        </Panel>
 
-        <Card icon={<Network className="h-4 w-4 text-muted-foreground" />} title="Network" subtitle="Totals since boot · current rates">
-          <StatRow label="Sent (total)" value={gb(net.sent_total_gb)} />
-          <StatRow label="Received (total)" value={gb(net.recv_total_gb)} />
-          <StatRow label="Packets sent" value={count(net.packets_sent)} />
-          <StatRow label="Packets recv" value={count(net.packets_recv)} />
-          <StatRow label="Errors in/out" value={`${count(net.errin)} / ${count(net.errout)}`} />
-          <StatRow label="Drops in/out" value={`${count(net.dropin)} / ${count(net.dropout)}`} />
-          <StatRow label="↑ Rate" value={rate(net.sent_mbps)} />
-          <StatRow label="↓ Rate" value={rate(net.recv_mbps)} />
-        </Card>
+        <Panel icon={Network} title="Network" subtitle="Totals since boot and current rates">
+          <MetricList
+            rows={[
+              { label: "Sent (total)", value: gb(net.sent_total_gb) },
+              { label: "Received (total)", value: gb(net.recv_total_gb) },
+              { label: "Packets sent / received", value: `${formatNumber(net.packets_sent)} / ${formatNumber(net.packets_recv)}` },
+              { label: "Errors in / out", value: `${formatNumber(net.errin)} / ${formatNumber(net.errout)}` },
+              { label: "Drops in / out", value: `${formatNumber(net.dropin)} / ${formatNumber(net.dropout)}` },
+              { label: "Upload rate", value: rate(net.sent_mbps) },
+              { label: "Download rate", value: rate(net.recv_mbps) },
+            ]}
+          />
+        </Panel>
 
-        <Card icon={<Info className="h-4 w-4 text-muted-foreground" />} title="System info" subtitle="Host & OS">
-          <StatRow label="Hostname" value={platform.hostname ?? "—"} />
-          <StatRow label="OS" value={<span className="max-w-[60%] truncate" title={platform.os_detail ?? ""}>{platform.os_detail ?? platform.os ?? "—"}</span>} />
-          <StatRow label="Uptime" value={fmtUptime(r.uptime_seconds)} />
-          <StatRow label="Booted" value={r.boot_time ? new Date(r.boot_time).toLocaleString() : "—"} />
-        </Card>
+        <Panel icon={Info} title="System info" subtitle="Host and OS">
+          <MetricList
+            rows={[
+              { label: "Hostname", value: <span className="font-mono text-xs">{platform.hostname ?? "—"}</span> },
+              {
+                label: "OS",
+                value: <span title={platform.os_detail ?? ""}>{platform.os_detail ?? platform.os ?? "—"}</span>,
+              },
+              { label: "Uptime", value: fmtUptime(r.uptime_seconds) },
+              { label: "Booted", value: r.boot_time ? formatDateTime(r.boot_time) : "—" },
+            ]}
+          />
+        </Panel>
       </div>
     </section>
   );

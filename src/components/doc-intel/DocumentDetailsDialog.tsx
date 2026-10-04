@@ -1,77 +1,76 @@
 import { useState, type ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertCircle, FileText } from "lucide-react";
 import { PREVIEW_MAX_CHARS, useKbDocument, useKbDocumentPreview } from "@/hooks/useDocumentImport";
 import {
   STAGE_STATUS_LABELS,
   failureReason,
   formatBytes,
-  formatCostUsd,
   formatCount,
   formatDuration,
-  formatWhen,
   orderedStages,
   stageLabel,
   stageStatusOf,
 } from "@/lib/doc-intel";
 import { ApiError, formatUserError } from "@/lib/errors";
+import { formatDateTime, formatMoney } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/data/empty-state";
+import { Stat, StatGroup } from "@/components/data/stat";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
-import { KPIStatCard } from "@/components/shared/KPIStatCard";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SkeletonText } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DocStatusBadge } from "@/components/doc-intel/DocStatusBadge";
 import { KeyValueTable } from "@/components/doc-intel/KeyValueTable";
-import { Notice } from "@/components/doc-intel/Notice";
-import { STAGE_STATUS_STYLE, StageStatusIcon } from "@/components/doc-intel/StagePipeline";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
+import { STAGE_TEXT_CLASS, StageMarker, StagePipeline } from "@/components/doc-intel/StagePipeline";
 import type { KbDocumentOut } from "@/types/api";
 
 type TabId = "overview" | "text";
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "text", label: "Extracted text" },
-];
-
 function SectionTitle({ children }: { children: ReactNode }) {
-  return <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{children}</h3>;
+  return <h3 className="text-sm font-semibold text-foreground">{children}</h3>;
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Fact({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className="min-w-0">
+    <div className={cn("min-w-0", className)}>
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 break-words text-sm text-foreground">{children}</dd>
+      <dd className="mt-0.5 break-words text-ui text-foreground">{children}</dd>
     </div>
   );
 }
 
 function StageTimeline({ doc }: { doc: KbDocumentOut }) {
   return (
-    <ol className="space-y-2">
+    <ol className="divide-y divide-border overflow-hidden rounded-lg border border-border">
       {orderedStages(doc.stages).map((stage) => {
-        const style = STAGE_STATUS_STYLE[stage.status] ?? STAGE_STATUS_STYLE.PENDING;
         const took = formatDuration(stage.started_at, stage.finished_at);
         const times = [
-          stage.started_at ? `Started ${formatWhen(stage.started_at)}` : null,
-          stage.finished_at ? `Finished ${formatWhen(stage.finished_at)}` : null,
+          stage.started_at ? `Started ${formatDateTime(stage.started_at)}` : null,
+          stage.finished_at ? `finished ${formatDateTime(stage.finished_at)}` : null,
           took ? `took ${took}` : null,
         ].filter(Boolean);
         return (
-          <li key={stage.name} className="rounded-lg border border-border px-3 py-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
-                <StageStatusIcon status={stage.status} className={`h-4 w-4 ${style.text}`} />
-                {stageLabel(stage.name)}
-              </span>
-              <span className={`text-xs font-semibold ${style.text}`}>
-                {STAGE_STATUS_LABELS[stage.status] ?? stage.status}
-              </span>
+          <li key={stage.name} className="flex items-start gap-3 px-3 py-2.5">
+            <StageMarker status={stage.status} className="mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
+                <span className="text-ui font-medium text-foreground">{stageLabel(stage.name)}</span>
+                <span className={cn("text-xs font-medium", STAGE_TEXT_CLASS[stage.status])}>
+                  {STAGE_STATUS_LABELS[stage.status] ?? stage.status}
+                </span>
+              </div>
+              {times.length > 0 && <p className="mt-0.5 text-xs text-muted-foreground">{times.join(" · ")}</p>}
+              {stage.status === "FAILED" && (
+                <p className="mt-1 break-words text-xs text-danger">
+                  {stage.error?.trim() || doc.error_message?.trim() || "No reason was recorded."}
+                </p>
+              )}
             </div>
-            {times.length > 0 && <p className="mt-1 text-xs text-muted-foreground">{times.join(" · ")}</p>}
-            {stage.status === "FAILED" && (
-              <p className="mt-1 break-words text-sm text-red-700">
-                {stage.error?.trim() || doc.error_message?.trim() || "No reason was recorded."}
-              </p>
-            )}
           </li>
         );
       })}
@@ -86,66 +85,88 @@ function Overview({ doc }: { doc: KbDocumentOut }) {
   return (
     <div className="space-y-6">
       {doc.status === "FAILED" && (
-        <Notice tone="danger" title={`Failed at ${stageLabel(doc.failed_stage ?? doc.stages.find((s) => s.status === "FAILED")?.name)}`}>
-          {reason ?? "No reason was recorded."}
-        </Notice>
+        <Alert
+          tone="danger"
+          title={`Failed at ${stageLabel(doc.failed_stage ?? doc.stages.find((s) => s.status === "FAILED")?.name)}`}
+          description={reason ?? "No reason was recorded."}
+        />
       )}
 
-      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-        <Field label="Account">
-          {doc.organization_name ? `${doc.organization_name} · ` : ""}
-          {doc.account_name ?? `Account #${doc.account_id}`}
-        </Field>
-        <Field label="Queues">
+      <section className="space-y-3">
+        <SectionTitle>Pipeline</SectionTitle>
+        <div className="rounded-lg border border-border px-3 py-3">
+          <StagePipeline variant="labeled" stages={doc.stages} fallbackError={doc.error_message} showReason={false} />
+        </div>
+        {doc.status === "QUEUED" && doc.queue_position != null && (
+          <p className="text-xs text-muted-foreground">Waiting in the import queue: position #{doc.queue_position}.</p>
+        )}
+      </section>
+
+      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Fact label="Account">
+          <bdi>
+            {doc.organization_name ? `${doc.organization_name} · ` : ""}
+            {doc.account_name ?? `Account #${doc.account_id}`}
+          </bdi>
+        </Fact>
+        <Fact label="Queues">
           {queues.length ? (
             <span className="flex flex-wrap gap-1">
               {queues.map((label, i) => (
-                <span
-                  key={`${doc.queue_keys[i]}-${i}`}
-                  className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-xs font-medium"
-                >
-                  {label}
-                </span>
+                <Badge key={`${doc.queue_keys[i]}-${i}`} variant="neutral">
+                  <bdi>{label}</bdi>
+                </Badge>
               ))}
             </span>
           ) : (
             "—"
           )}
-        </Field>
-        <Field label="Uploaded by">{doc.uploaded_by_email ?? (doc.uploaded_by != null ? `User #${doc.uploaded_by}` : "—")}</Field>
-        <Field label="Uploaded">{formatWhen(doc.created_at)}</Field>
-        <Field label="Last updated">{formatWhen(doc.updated_at)}</Field>
-        <Field label="Published">{formatWhen(doc.published_at)}</Field>
-        <Field label="File">
+        </Fact>
+        <Fact label="Uploaded by">{doc.uploaded_by_email ?? (doc.uploaded_by != null ? `User #${doc.uploaded_by}` : "—")}</Fact>
+        <Fact label="Uploaded">{formatDateTime(doc.created_at)}</Fact>
+        <Fact label="Last updated">
+          {formatDateTime(doc.updated_at)}
+          {doc.updated_at && (
+            <span className="text-muted-foreground">
+              {" "}
+              (<RelativeTime value={doc.updated_at} />)
+            </span>
+          )}
+        </Fact>
+        <Fact label="Published">{formatDateTime(doc.published_at)}</Fact>
+        <Fact label="File">
           {formatBytes(doc.size_bytes)}
           {doc.content_type ? <span className="text-muted-foreground"> · {doc.content_type}</span> : null}
-        </Field>
-        <Field label="Attempts">{formatCount(doc.attempts)}</Field>
-        {doc.status === "QUEUED" && doc.queue_position != null && (
-          <Field label="Queue position">#{doc.queue_position}</Field>
-        )}
+        </Fact>
+        <Fact label="Attempts">{formatCount(doc.attempts)}</Fact>
+        {doc.status === "QUEUED" && doc.queue_position != null && <Fact label="Queue position">#{doc.queue_position}</Fact>}
         {doc.batch_id && (
-          <Field label="Upload batch">
+          <Fact label="Upload batch">
             <span className="font-mono text-xs">{doc.batch_id}</span>
-          </Field>
+          </Fact>
         )}
         {doc.sha256 && (
-          <Field label="SHA-256">
+          <Fact label="SHA-256">
             <span className="font-mono text-xs" title={doc.sha256}>
               {doc.sha256.slice(0, 16)}…
             </span>
-          </Field>
+          </Fact>
         )}
       </dl>
 
       <section className="space-y-2">
         <SectionTitle>Metrics</SectionTitle>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <KPIStatCard label="Pages" value={formatCount(doc.page_count)} />
-          <KPIStatCard label="Chunks" value={formatCount(doc.chunk_count)} />
-          <KPIStatCard label="Embedding tokens" value={formatCount(doc.tokens_used)} />
-          <KPIStatCard label="Cost" value={formatCostUsd(doc.cost_usd)} />
-        </div>
+        <StatGroup columns={4} variant="strip" aria-label="Document metrics">
+          <Stat emphasis="secondary" label="Pages" value={formatCount(doc.page_count)} />
+          <Stat emphasis="secondary" label="Chunks" value={formatCount(doc.chunk_count)} />
+          <Stat emphasis="secondary" label="Embedding tokens" value={formatCount(doc.tokens_used)} />
+          <Stat
+            emphasis="secondary"
+            label="Cost"
+            value={formatMoney(doc.cost_usd, "USD")}
+            info="Embedding cost as reported by the server, in US dollars."
+          />
+        </StatGroup>
       </section>
 
       <section className="space-y-2">
@@ -160,18 +181,14 @@ function Overview({ doc }: { doc: KbDocumentOut }) {
         ) : (
           <ul className="space-y-2">
             {doc.warnings.map((w, i) => (
-              <li
-                key={`${w.code}-${i}`}
-                className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
-              >
-                <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-                <div className="min-w-0">
-                  <p className="break-words">{w.message}</p>
-                  <p className="mt-0.5 font-mono text-xs opacity-80">
+              <li key={`${w.code}-${i}`}>
+                <Alert tone="warning">
+                  <span dir="auto">{w.message}</span>
+                  <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
                     {w.code}
                     {w.page != null ? ` · page ${w.page}` : ""}
-                  </p>
-                </div>
+                  </span>
+                </Alert>
               </li>
             ))}
           </ul>
@@ -188,20 +205,32 @@ function ExtractedText({ doc }: { doc: KbDocumentOut }) {
 
   if (!extracted) {
     return (
-      <p className="text-sm text-muted-foreground">The extracted text is available once the extraction stage has completed.</p>
+      <EmptyState
+        size="sm"
+        icon={FileText}
+        title="No extracted text yet"
+        description="The extracted text is available once the extraction stage has completed."
+      />
     );
   }
-  if (preview.isLoading) return <p className="text-sm text-muted-foreground">Loading extracted text…</p>;
+  if (preview.isLoading) {
+    return (
+      <div aria-busy="true" className="space-y-4">
+        <SkeletonText lines={6} />
+        <SkeletonText lines={4} />
+      </div>
+    );
+  }
   if (preview.isError) {
     // 409 = no readable extracted text (yet); the server says why.
     if (preview.error instanceof ApiError && preview.error.status === 409) {
-      return <p className="text-sm text-muted-foreground">{formatUserError(preview.error)}</p>;
+      return <EmptyState size="sm" icon={FileText} title="No readable text" description={formatUserError(preview.error)} />;
     }
     return <ErrorAlert message={formatUserError(preview.error)} />;
   }
 
   const data = preview.data;
-  if (!data || data.pages.length === 0) return <p className="text-sm text-muted-foreground">No text was extracted.</p>;
+  if (!data || data.pages.length === 0) return <EmptyState size="sm" icon={FileText} title="No text was extracted" />;
 
   return (
     <div className="space-y-4">
@@ -213,7 +242,7 @@ function ExtractedText({ doc }: { doc: KbDocumentOut }) {
       </p>
       {data.pages.map((page) => (
         <section key={page.number} className="overflow-hidden rounded-lg border border-border">
-          <h4 className="border-b border-border bg-muted px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h4 className="border-b border-border bg-surface-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
             Page {page.number}
           </h4>
           {/* dir="auto" + plaintext bidi: each paragraph of Arabic or English text gets its own direction. */}
@@ -247,41 +276,39 @@ export function DocumentDetailsDialog({ document: snapshot, onClose }: Props) {
   const doc = detail.data ?? snapshot;
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} size="max-w-3xl">
-      {/* Keeps DialogContent's own p-6 (a p-0 override loses to it in the generated CSS). */}
-      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-2rem))] flex-col overflow-hidden">
-        <DialogHeader className="space-y-3 border-b border-slate-100 pb-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+    <Dialog open onOpenChange={(open) => !open && onClose()} size="xl">
+      <DialogContent>
+        <DialogHeader className="gap-3 pb-0">
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
             <div className="min-w-0">
-              <DialogTitle className="break-words">{doc.filename}</DialogTitle>
-              <p className="mt-1 text-sm text-muted-foreground">Document #{doc.id}</p>
+              <DialogTitle className="break-words">
+                <bdi>{doc.filename}</bdi>
+              </DialogTitle>
+              <DialogDescription>
+                Document <span className="font-mono">#{doc.id}</span> · {formatBytes(doc.size_bytes)}
+              </DialogDescription>
             </div>
-            <DocStatusBadge status={doc.status} />
+            <DocStatusBadge status={doc.status} className="mt-1" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {TABS.map((t) => (
-              <Button
-                key={t.id}
-                size="sm"
-                variant={tab === t.id ? "default" : "outline"}
-                aria-pressed={tab === t.id}
-                onClick={() => setTab(t.id)}
-              >
-                {t.label}
-              </Button>
-            ))}
-          </div>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
+            <TabsList aria-label="Document details" className="border-b-0">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="text">Extracted text</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </DialogHeader>
-        <DialogBody className="min-h-0 flex-1 pr-1">
+        <DialogBody>
           {detail.isError && (
-            <ErrorAlert
+            <Alert
+              tone="danger"
+              icon={AlertCircle}
               className="mb-4"
-              message={`Couldn't refresh this document: ${formatUserError(detail.error)}`}
+              description={`Couldn't refresh this document: ${formatUserError(detail.error)}`}
             />
           )}
           {tab === "overview" ? <Overview doc={doc} /> : <ExtractedText doc={doc} />}
         </DialogBody>
-        <DialogFooter className="border-t border-slate-100 pt-4">
+        <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>

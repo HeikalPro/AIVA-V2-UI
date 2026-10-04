@@ -1,21 +1,28 @@
-import { formatDuration, formatWhen } from "@/lib/doc-intel";
+import type { ReactNode } from "react";
+import { History } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { formatNumber } from "@/lib/format";
+import { formatDuration } from "@/lib/doc-intel";
 import { RUN_TRIGGER_LABELS, listingIncomplete } from "@/lib/sharepoint-sync";
-import { DataTable, type Column } from "@/components/shared/DataTable";
+import { DataTable, type Column, type DataTableEmpty, type ServerPaginationOptions } from "@/components/data/data-table";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
 import { RunStatusBadge } from "@/components/doc-intel/SyncBadges";
 import type { SyncRunOut } from "@/types/api";
 
 type Props = {
   runs: SyncRunOut[];
   loading?: boolean;
-  emptyMessage?: string;
+  empty?: DataTableEmpty;
+  /** Server pagination ({items, limit, offset, total} API). */
+  pagination?: ServerPaginationOptions;
+  toolbar?: ReactNode;
+  toolbarEnd?: ReactNode;
 };
 
-function Count({ value, tone }: { value: number; tone?: "red" }) {
+function Count({ value, danger = false }: { value: number; danger?: boolean }) {
   return (
-    <span
-      className={`block text-right tabular-nums ${value === 0 ? "text-muted-foreground" : tone === "red" ? "font-semibold text-red-700" : "text-foreground"}`}
-    >
-      {value.toLocaleString()}
+    <span className={cn(value === 0 ? "text-muted-foreground" : danger ? "font-medium text-danger" : "text-foreground")}>
+      {formatNumber(value)}
     </span>
   );
 }
@@ -23,18 +30,18 @@ function Count({ value, tone }: { value: number; tone?: "red" }) {
 function runDuration(run: SyncRunOut): string {
   const took = formatDuration(run.started_at, run.finished_at);
   if (took) return took;
-  if (run.status === "RUNNING") return "running…";
-  if (run.status === "QUEUED") return "waiting to start";
+  if (run.status === "RUNNING") return "Running…";
+  if (run.status === "QUEUED") return "Waiting to start";
   return "—";
 }
 
 /** One row per sync: trigger, status, timing and the new / changed / deleted / unchanged / failed counts. */
-export function SyncRunsTable({ runs, loading, emptyMessage = "No syncs yet. Press Sync now to run the first one." }: Props) {
-  const countCol = (key: string, header: string, pick: (r: SyncRunOut) => number, tone?: "red"): Column<SyncRunOut> => ({
+export function SyncRunsTable({ runs, loading, empty, pagination, toolbar, toolbarEnd }: Props) {
+  const countCol = (key: string, header: string, pick: (r: SyncRunOut) => number, danger = false): Column<SyncRunOut> => ({
     key,
     header,
-    headClassName: "text-right",
-    render: (r) => <Count value={pick(r) ?? 0} tone={tone} />,
+    numeric: true,
+    render: (r) => <Count value={pick(r) ?? 0} danger={danger} />,
   });
 
   const columns: Column<SyncRunOut>[] = [
@@ -42,10 +49,10 @@ export function SyncRunsTable({ runs, loading, emptyMessage = "No syncs yet. Pre
       key: "trigger",
       header: "Sync",
       render: (r) => (
-        <div className="min-w-[7rem]">
+        <div className="min-w-[8rem]">
           <p className="font-medium text-foreground">{RUN_TRIGGER_LABELS[r.trigger_type] ?? r.trigger_type}</p>
-          <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-            #{r.id}
+          <p className="truncate text-xs text-muted-foreground">
+            <span className="font-mono">#{r.id}</span>
             {r.trigger_type === "MANUAL" && (r.triggered_by_email || r.triggered_by != null)
               ? ` · ${r.triggered_by_email ?? `User #${r.triggered_by}`}`
               : ""}
@@ -60,20 +67,16 @@ export function SyncRunsTable({ runs, loading, emptyMessage = "No syncs yet. Pre
         const incomplete = listingIncomplete(r);
         const error = r.error_message?.trim();
         return (
-          <div className="min-w-[9rem] max-w-xs space-y-1">
+          <div className="min-w-[8rem] max-w-[20rem] space-y-0.5">
             <RunStatusBadge status={r.status} />
             {error && (r.status === "FAILED" || r.status === "PARTIAL") && (
-              <p
-                className={`line-clamp-3 break-words text-xs ${r.status === "FAILED" ? "text-red-700" : "text-amber-700"}`}
-                title={error}
-              >
+              <p className={cn("line-clamp-2 break-words text-xs", r.status === "FAILED" ? "text-danger" : "text-warning")} title={error}>
                 {error}
               </p>
             )}
             {incomplete && (
-              <p className="break-words text-xs text-amber-700">
-                Listing incomplete{incomplete.reason ? ` (${incomplete.reason})` : ""}: files missing from it were not
-                marked deleted.
+              <p className="break-words text-xs text-warning">
+                Listing incomplete{incomplete.reason ? ` (${incomplete.reason})` : ""}: files missing from it were not marked deleted.
               </p>
             )}
           </div>
@@ -81,31 +84,36 @@ export function SyncRunsTable({ runs, loading, emptyMessage = "No syncs yet. Pre
       },
     },
     {
-      key: "when",
-      header: "When",
-      render: (r) => (
-        <div className="min-w-[9rem] space-y-0.5 text-xs">
-          <p>
-            <span className="text-muted-foreground">Started </span>
-            {r.started_at ? formatWhen(r.started_at) : r.status === "QUEUED" ? "not yet" : "—"}
-          </p>
-          <p>
-            <span className="text-muted-foreground">Finished </span>
-            {r.finished_at ? formatWhen(r.finished_at) : "—"}
-          </p>
-          <p>
-            <span className="text-muted-foreground">Took </span>
-            {runDuration(r)}
-          </p>
-        </div>
-      ),
+      key: "started",
+      header: "Started",
+      render: (r) =>
+        r.started_at ? (
+          <RelativeTime value={r.started_at} />
+        ) : (
+          <span className="text-muted-foreground">{r.status === "QUEUED" ? "Not yet" : "—"}</span>
+        ),
     },
+    { key: "duration", header: "Duration", render: (r) => <span className="whitespace-nowrap">{runDuration(r)}</span> },
     countCol("new", "New", (r) => r.files_new),
     countCol("changed", "Changed", (r) => r.files_changed),
     countCol("deleted", "Deleted", (r) => r.files_deleted),
     countCol("unchanged", "Unchanged", (r) => r.files_unchanged),
-    countCol("failed", "Failed", (r) => r.files_failed, "red"),
+    countCol("failed", "Failed", (r) => r.files_failed, true),
   ];
 
-  return <DataTable columns={columns} data={runs} keyFn={(r) => r.id} loading={loading} emptyMessage={emptyMessage} />;
+  return (
+    <DataTable<SyncRunOut>
+      aria-label="Sync history"
+      columns={columns}
+      data={runs}
+      keyFn={(r) => r.id}
+      loading={loading}
+      itemLabel="syncs"
+      itemLabelSingular="sync"
+      pagination={pagination ?? false}
+      toolbar={toolbar}
+      toolbarEnd={toolbarEnd}
+      empty={empty ?? { icon: History, title: "No syncs yet", description: "Press Sync now to run the first one." }}
+    />
+  );
 }

@@ -10,8 +10,12 @@ import {
   presetLabel,
   type ScheduleDraft,
 } from "@/lib/sharepoint-sync";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { ToggleChip } from "@/components/widget-config/ToggleChip";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -41,86 +45,67 @@ export function SyncScheduleField({
 }: Props) {
   const id = useId();
   const set = (patch: Partial<ScheduleDraft>) => onChange({ ...value, ...patch });
-  const chip = (on: boolean) =>
-    `inline-flex items-center rounded-full border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${
-      on
-        ? "border-primary bg-primary/10 text-primary"
-        : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
-    }`;
 
   return (
     <div className="space-y-4">
-      <label className="flex items-start gap-3">
-        <input
-          type="checkbox"
+      <Field
+        orientation="horizontal"
+        label="Automatic sync"
+        htmlFor={`${id}-enabled`}
+        hint="Check the folder on a schedule. Sync now works either way."
+      >
+        <Switch
+          id={`${id}-enabled`}
           checked={value.enabled}
           disabled={disabled}
-          onChange={(e) => set({ enabled: e.target.checked })}
+          onCheckedChange={(on) => set({ enabled: on })}
           aria-describedby={`${id}-preview`}
-          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 accent-primary"
         />
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-slate-700">Automatic sync</span>
-          <span className="block text-xs text-muted-foreground">
-            Check the folder on a schedule. Sync now works either way.
-          </span>
-        </span>
-      </label>
+      </Field>
 
       {value.enabled && (
-        <div className="space-y-4 border-l-2 border-border pl-4">
+        <div className="space-y-4 rounded-lg border border-border bg-surface-muted px-4 py-3">
           <div role="group" aria-labelledby={`${id}-interval`} className="space-y-2">
-            <span id={`${id}-interval`} className="block text-sm font-medium text-slate-700">
-              Repeat
-            </span>
+            <Label id={`${id}-interval`}>Repeat</Label>
             <div className="flex flex-wrap gap-2">
               {SYNC_INTERVAL_PRESETS.map((days) => (
-                <button
+                <ToggleChip
                   key={days}
-                  type="button"
-                  aria-pressed={value.interval === days}
+                  pressed={value.interval === days}
                   disabled={disabled}
-                  onClick={() => set({ interval: days, customDays: String(days) })}
-                  className={chip(value.interval === days)}
+                  onPressedChange={() => set({ interval: days, customDays: String(days) })}
                 >
                   {presetLabel(days)}
-                </button>
+                </ToggleChip>
               ))}
-              <button
-                type="button"
-                aria-pressed={value.interval === "custom"}
-                disabled={disabled}
-                onClick={() => set({ interval: "custom" })}
-                className={chip(value.interval === "custom")}
-              >
+              <ToggleChip pressed={value.interval === "custom"} disabled={disabled} onPressedChange={() => set({ interval: "custom" })}>
                 Custom (days)
-              </button>
+              </ToggleChip>
             </div>
             {value.interval === "custom" && (
               <div>
                 <div className="flex items-center gap-2">
-                  <label htmlFor={`${id}-days`} className="text-sm text-slate-700">
+                  <Label htmlFor={`${id}-days`} className="font-normal">
                     Every
-                  </label>
-                  <div className="w-24">
-                    <Input
-                      id={`${id}-days`}
-                      type="number"
-                      inputMode="numeric"
-                      min={MIN_SYNC_INTERVAL_DAYS}
-                      max={MAX_SYNC_INTERVAL_DAYS}
-                      step={1}
-                      value={value.customDays}
-                      disabled={disabled}
-                      onChange={(e) => set({ customDays: e.target.value })}
-                      aria-invalid={intervalError ? true : undefined}
-                      aria-describedby={intervalError ? `${id}-days-error` : undefined}
-                    />
-                  </div>
-                  <span className="text-sm text-slate-700">days</span>
+                  </Label>
+                  <Input
+                    id={`${id}-days`}
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_SYNC_INTERVAL_DAYS}
+                    max={MAX_SYNC_INTERVAL_DAYS}
+                    step={1}
+                    value={value.customDays}
+                    disabled={disabled}
+                    onChange={(e) => set({ customDays: e.target.value })}
+                    aria-invalid={intervalError ? true : undefined}
+                    aria-describedby={intervalError ? `${id}-days-error` : undefined}
+                    className="w-24"
+                  />
+                  <span className="text-sm text-foreground">days</span>
                 </div>
                 {intervalError && (
-                  <p id={`${id}-days-error`} className="mt-1 text-xs text-red-600">
+                  <p id={`${id}-days-error`} className="mt-1 text-xs font-medium text-danger">
                     {intervalError}
                   </p>
                 )}
@@ -128,28 +113,21 @@ export function SyncScheduleField({
             )}
           </div>
 
-          <div>
-            <label htmlFor={`${id}-hour`} className="block text-sm font-medium text-slate-700">
-              Time of day
-            </label>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <div className="w-28">
-                <Select
-                  id={`${id}-hour`}
-                  value={String(value.hour)}
-                  disabled={disabled}
-                  onChange={(e) => set({ hour: Number(e.target.value) })}
-                >
-                  {HOURS.map((h) => (
-                    <option key={h} value={h}>
-                      {hourLabel(h)}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <span className="text-xs text-muted-foreground">{SCHEDULE_TIME_ZONE_LABEL}</span>
-            </div>
-          </div>
+          <Field label="Time of day" htmlFor={`${id}-hour`} hint={SCHEDULE_TIME_ZONE_LABEL}>
+            <Select
+              id={`${id}-hour`}
+              value={String(value.hour)}
+              disabled={disabled}
+              onChange={(e) => set({ hour: Number(e.target.value) })}
+              className="w-28"
+            >
+              {HOURS.map((h) => (
+                <option key={h} value={h}>
+                  {hourLabel(h)}
+                </option>
+              ))}
+            </Select>
+          </Field>
         </div>
       )}
 
@@ -171,9 +149,9 @@ export function SyncScheduleField({
             )}
           </p>
           {value.enabled && !schedulerEnabled && (
-            <p className="text-amber-700">
-              Automatic syncs are off on this server (DOC_INTEL_SCHEDULER_ENABLED=false), so this schedule won't run until
-              they are turned on.
+            <p className="text-warning">
+              Automatic syncs are off on this server (DOC_INTEL_SCHEDULER_ENABLED=false), so this schedule won't run until they are
+              turned on.
             </p>
           )}
         </div>

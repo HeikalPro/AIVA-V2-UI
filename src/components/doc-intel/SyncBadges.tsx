@@ -1,69 +1,84 @@
-import { KeyRound, Loader2 } from "lucide-react";
-import { formatWhen } from "@/lib/doc-intel";
+import { KeyRound } from "lucide-react";
+import { formatDate } from "@/lib/format";
 import {
   ENTITY_STATUS_LABELS,
   FILE_STATUS_LABELS,
   RUN_STATUS_LABELS,
   SOURCE_STATUS_LABELS,
 } from "@/lib/sharepoint-sync";
+import { Status, type StatusTone } from "@/components/data/status";
+import { Badge } from "@/components/ui/badge";
+import { RelativeTime } from "./RelativeTime";
 import type { EntityStatus, FileStatus, RunStatus, SourceOut, SourceStatus } from "@/types/api";
 
-type Tone = "grey" | "running" | "green" | "amber" | "red";
+/*
+ * SharePoint sync statuses, all rendered with the shared <Status> (dot + label; running states
+ * pulse). Labels come from lib/sharepoint-sync so wording stays identical everywhere.
+ */
 
-// Same shapes as ui/badge; "running" uses the theme primary (text-primary), everything else
-// dark-remapped shades, so no index.css change is needed.
-const TONE_CLASS: Record<Tone, string> = {
-  grey: "bg-slate-100 text-slate-600",
-  running: "bg-primary/10 text-primary",
-  green: "bg-emerald-100 text-emerald-800",
-  amber: "bg-amber-100 text-amber-800",
-  red: "bg-red-100 text-red-800",
+const RUN_TONE: Record<RunStatus, StatusTone> = {
+  QUEUED: "neutral",
+  RUNNING: "warning",
+  COMPLETED: "success",
+  PARTIAL: "warning",
+  FAILED: "danger",
 };
 
-function StatusPill({ tone, label, spin = false }: { tone: Tone; label: string; spin?: boolean }) {
+type BadgeProps = { className?: string; variant?: "dot" | "badge" };
+
+/** Completed (green), partial (amber), failed (red), running (amber, pulsing), queued (grey). */
+export function RunStatusBadge({ status, className, variant }: { status: RunStatus } & BadgeProps) {
   return (
-    <span
-      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${TONE_CLASS[tone]}`}
-    >
-      {spin && <Loader2 aria-hidden="true" className="mr-1 h-3 w-3 animate-spin" />}
-      {label}
-    </span>
+    <Status
+      tone={RUN_TONE[status] ?? "neutral"}
+      label={RUN_STATUS_LABELS[status] ?? status}
+      pulse={status === "RUNNING"}
+      variant={variant}
+      className={className}
+    />
   );
 }
 
-const RUN_TONE: Record<RunStatus, Tone> = {
-  QUEUED: "grey",
-  RUNNING: "running",
-  COMPLETED: "green",
-  PARTIAL: "amber",
-  FAILED: "red",
+const FILE_TONE: Record<FileStatus, StatusTone> = {
+  PENDING: "neutral",
+  PROCESSING: "warning",
+  COMPLETED: "success",
+  FAILED: "danger",
+  SKIPPED: "neutral",
 };
 
-/** COMPLETED green, PARTIAL amber, FAILED red, RUNNING spinner, QUEUED grey. */
-export function RunStatusBadge({ status }: { status: RunStatus }) {
-  return <StatusPill tone={RUN_TONE[status] ?? "grey"} label={RUN_STATUS_LABELS[status] ?? status} spin={status === "RUNNING"} />;
-}
-
-const FILE_TONE: Record<FileStatus, Tone> = {
-  PENDING: "grey",
-  PROCESSING: "running",
-  COMPLETED: "green",
-  FAILED: "red",
-  SKIPPED: "grey",
-};
-
-export function FileStatusBadge({ status }: { status: FileStatus }) {
+export function FileStatusBadge({ status, className, variant }: { status: FileStatus } & BadgeProps) {
   return (
-    <StatusPill tone={FILE_TONE[status] ?? "grey"} label={FILE_STATUS_LABELS[status] ?? status} spin={status === "PROCESSING"} />
+    <Status
+      tone={FILE_TONE[status] ?? "neutral"}
+      label={FILE_STATUS_LABELS[status] ?? status}
+      pulse={status === "PROCESSING"}
+      variant={variant}
+      className={className}
+    />
   );
 }
 
-export function SourceStatusBadge({ status }: { status: SourceStatus }) {
-  return <StatusPill tone={status === "ACTIVE" ? "green" : "grey"} label={SOURCE_STATUS_LABELS[status] ?? status} />;
+export function SourceStatusBadge({ status, className, variant }: { status: SourceStatus } & BadgeProps) {
+  return (
+    <Status
+      tone={status === "ACTIVE" ? "success" : "neutral"}
+      label={SOURCE_STATUS_LABELS[status] ?? status}
+      variant={variant}
+      className={className}
+    />
+  );
 }
 
-export function EntityStatusBadge({ status }: { status: EntityStatus }) {
-  return <StatusPill tone={status === "ACTIVE" ? "green" : "grey"} label={ENTITY_STATUS_LABELS[status] ?? status} />;
+export function EntityStatusBadge({ status, className, variant }: { status: EntityStatus } & BadgeProps) {
+  return (
+    <Status
+      tone={status === "ACTIVE" ? "success" : "neutral"}
+      label={ENTITY_STATUS_LABELS[status] ?? status}
+      variant={variant}
+      className={className}
+    />
+  );
 }
 
 /**
@@ -86,29 +101,32 @@ export function LastSyncSummary({
   return (
     <div className="min-w-0 space-y-1">
       {active && (
-        <p className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-          <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
-          {run.status === "QUEUED" ? "Sync queued" : "Sync running"}
-        </p>
+        <Status
+          tone={run.status === "QUEUED" ? "neutral" : "warning"}
+          pulse={run.status === "RUNNING"}
+          label={run.status === "QUEUED" ? "Sync queued" : "Sync running"}
+        />
       )}
       {never ? (
-        <p className="text-sm text-muted-foreground">Never synced.</p>
+        <p className="text-sm text-muted-foreground">Never synced</p>
       ) : (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {source.last_sync_status && <RunStatusBadge status={source.last_sync_status} />}
-          <span className="text-sm text-foreground">{formatWhen(source.last_sync_at)}</span>
+          <RelativeTime value={source.last_sync_at} className="text-ui text-muted-foreground" />
         </div>
       )}
       {showError && (
         <p
-          className={`line-clamp-3 break-words text-xs ${source.last_sync_status === "FAILED" ? "text-red-700" : "text-amber-700"}`}
+          className={`line-clamp-3 break-words text-xs ${source.last_sync_status === "FAILED" ? "text-danger" : "text-warning"}`}
           title={error}
         >
           {error}
         </p>
       )}
       {source.last_success_at && source.last_success_at !== source.last_sync_at && (
-        <p className="text-xs text-muted-foreground">Last successful sync: {formatWhen(source.last_success_at)}</p>
+        <p className="text-xs text-muted-foreground">
+          Last successful sync <RelativeTime value={source.last_success_at} />
+        </p>
       )}
     </div>
   );
@@ -124,29 +142,25 @@ export function SecretBadge({
 }) {
   if (!source.client_secret_set) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+      <Badge variant="warning">
         <KeyRound aria-hidden="true" className="h-3.5 w-3.5" />
         Not stored
-      </span>
+      </Badge>
     );
   }
   const parts = [
     "Stored",
     showHint && source.client_secret_hint ? `ends ${source.client_secret_hint}` : null,
-    source.secret_updated_at ? `updated ${formatWhen(source.secret_updated_at)}` : null,
+    source.secret_updated_at ? `updated ${formatDate(source.secret_updated_at)}` : null,
   ].filter(Boolean);
   const unreadable = source.credentials_readable === false;
   return (
-    <span
-      className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium ${
-        unreadable ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"
-      }`}
-    >
+    <Badge variant={unreadable ? "danger" : "success"} className="max-w-full whitespace-normal">
       <KeyRound aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 [overflow-wrap:anywhere]">
         {parts.join(" · ")}
         {unreadable ? " · can't be decrypted" : ""}
       </span>
-    </span>
+    </Badge>
   );
 }

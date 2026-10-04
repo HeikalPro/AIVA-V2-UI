@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Eye, FileUp, ListChecks, Loader2, RotateCcw, Send, Trash2, Upload } from "lucide-react";
+import { Eye, FileText, ListChecks, RotateCcw, Send, Trash2, Upload } from "lucide-react";
 import { formatUserError } from "@/lib/errors";
 import {
   DOC_STATUSES,
@@ -7,7 +7,6 @@ import {
   docIntelUnavailable,
   formatBytes,
   formatUploadError,
-  formatWhen,
   isActiveDocStatus,
   isUploadRejected,
   notInstalled,
@@ -18,6 +17,8 @@ import {
   type FileUploadState,
   type UploadCounts,
 } from "@/lib/doc-intel";
+import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useAccountKbQueues, useAccounts } from "@/hooks/useAccounts";
 import {
   useDocIntelStatus,
@@ -27,24 +28,32 @@ import {
   useUnpublishKbDocument,
   useUploadKbDocuments,
 } from "@/hooks/useDocumentImport";
-import { PageHeader } from "@/components/shared/PageHeader";
-import { DataTable, type Column } from "@/components/shared/DataTable";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, actionsColumn, type Column } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
 import { ErrorAlert } from "@/components/shared/ErrorAlert";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import { Field } from "@/components/ui/field";
+import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
+import { toast } from "@/components/ui/toast";
 import { ChangeQueuesDialog } from "@/components/doc-intel/ChangeQueuesDialog";
 import { DocStatusBadge } from "@/components/doc-intel/DocStatusBadge";
 import { DocumentDetailsDialog } from "@/components/doc-intel/DocumentDetailsDialog";
 import { FileDropzone } from "@/components/doc-intel/FileDropzone";
 import { Notice } from "@/components/doc-intel/Notice";
+import { QueueChips } from "@/components/doc-intel/QueueChips";
 import { QueueMultiSelect } from "@/components/doc-intel/QueueMultiSelect";
+import { RelativeTime } from "@/components/doc-intel/RelativeTime";
 import { StagePipeline } from "@/components/doc-intel/StagePipeline";
+import { AutoRefreshIndicator } from "@/components/system/AutoRefreshIndicator";
 import type { Account, DocStatus, KbDocumentOut } from "@/types/api";
 
 const PAGE_SIZE = 25;
+/** Display only: mirrors ACTIVE_REFETCH_MS in hooks/useDocumentImport (polls only while documents are processing). */
+const ACTIVE_REFRESH_MS = 3_000;
 
 function accountLabel(a: Account): string {
   return `${a.organization_name ?? `Org #${a.organization_id}`} · ${a.name}`;
@@ -80,13 +89,11 @@ function UploadBatchSummary({ counts, onDismiss }: { counts: UploadCounts; onDis
   const tone = notAccepted === 0 ? "success" : counts.accepted === 0 ? "danger" : "warning";
   return (
     <Notice tone={tone} title={uploadSummaryTitle(counts)} onDismiss={onDismiss}>
-      {counts.accepted > 0 && (
-        <p>Accepted files are queued for processing. Follow their progress in the Documents table below.</p>
-      )}
+      {counts.accepted > 0 && <p>Accepted files are queued for processing. Follow their progress in the Documents table below.</p>}
       {notAccepted > 0 && (
         <p className={counts.accepted > 0 ? "mt-1" : undefined}>
-          {notAccepted === 1 ? "The file that was not accepted stays" : "Files that were not accepted stay"} in the file
-          list with the reason. Fix or remove {notAccepted === 1 ? "it" : "them"}, then upload again.
+          {notAccepted === 1 ? "The file that was not accepted stays" : "Files that were not accepted stay"} in the file list with
+          the reason. Fix or remove {notAccepted === 1 ? "it" : "them"}, then upload again.
         </p>
       )}
     </Notice>
@@ -104,39 +111,9 @@ function batchProgress(states: ReadonlyMap<File, FileUploadState>) {
   return { done, total: states.size, current };
 }
 
-function Pagination({
-  offset,
-  limit,
-  total,
-  onChange,
-}: {
-  offset: number;
-  limit: number;
-  total: number;
-  onChange: (offset: number) => void;
-}) {
-  if (total <= limit && offset === 0) return null;
-  const from = total === 0 ? 0 : offset + 1;
-  const to = Math.min(offset + limit, total);
-  return (
-    <nav aria-label="Documents pages" className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-xs text-muted-foreground">
-        Showing {from}–{to} of {total}
-      </p>
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>
-          <ChevronLeft aria-hidden="true" className="mr-1 h-4 w-4" /> Previous
-        </Button>
-        <Button variant="outline" size="sm" disabled={offset + limit >= total} onClick={() => onChange(offset + limit)}>
-          Next <ChevronRight aria-hidden="true" className="ml-1 h-4 w-4" />
-        </Button>
-      </div>
-    </nav>
-  );
-}
-
 export function DocumentImportPage() {
   const status = useDocIntelStatus();
+  const workspace = useWorkspace();
   const { data: accounts = [], isLoading: accountsLoading } = useAccounts(null);
   const corpusAccounts = useMemo(
     () =>
@@ -157,6 +134,15 @@ export function DocumentImportPage() {
   const kbQueues = useAccountKbQueues(accountId);
   const upload = useUploadKbDocuments();
 
+  // Start on the workspace account when it has a knowledge base (once; the user's choice wins after that).
+  const [defaulted, setDefaulted] = useState(false);
+  if (!defaulted && corpusAccounts.length > 0 && !workspace.isLoading) {
+    setDefaulted(true);
+    if (accountId == null && workspace.accountId != null && corpusAccounts.some((a) => a.id === workspace.accountId)) {
+      setAccountId(workspace.accountId);
+    }
+  }
+
   // ---- Documents table ----
   const [accountFilter, setAccountFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -165,7 +151,6 @@ export function DocumentImportPage() {
   const [queuesDoc, setQueuesDoc] = useState<KbDocumentOut | null>(null);
   const [unpublishDoc, setUnpublishDoc] = useState<KbDocumentOut | null>(null);
   const [unpublishError, setUnpublishError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const retry = useRetryKbDocument();
   const republish = useRepublishKbDocument();
   const unpublish = useUnpublishKbDocument();
@@ -214,7 +199,7 @@ export function DocumentImportPage() {
     accountId == null
       ? "Select an account."
       : kbQueues.isLoading
-        ? "Loading the account's queues…"
+        ? "Waiting for the account's queues."
         : kbQueues.isError
           ? "The account's queues could not be loaded."
           : queues.length === 0
@@ -271,11 +256,11 @@ export function DocumentImportPage() {
   }
 
   function runRowAction(kind: "retry" | "republish", doc: KbDocumentOut) {
-    setActionError(null);
     const mutation = kind === "retry" ? retry : republish;
     mutation.mutate(doc.id, {
+      onSuccess: () => toast.success(kind === "retry" ? "Retry queued" : "Republish queued", { description: doc.filename }),
       onError: (e) =>
-        setActionError(`${kind === "retry" ? "Retry" : "Republish"} failed for “${doc.filename}”: ${formatUserError(e)}`),
+        toast.error(`${kind === "retry" ? "Retry" : "Republish"} failed`, { description: `“${doc.filename}”: ${formatUserError(e)}` }),
     });
   }
 
@@ -284,6 +269,7 @@ export function DocumentImportPage() {
     setUnpublishError(null);
     try {
       await unpublish.mutateAsync(unpublishDoc.id);
+      toast.success("Document unpublished", { description: unpublishDoc.filename });
       setUnpublishDoc(null);
     } catch (e) {
       setUnpublishError(formatUserError(e));
@@ -301,15 +287,12 @@ export function DocumentImportPage() {
       key: "file",
       header: "File",
       render: (doc) => (
-        // Wrapping (not truncate) keeps the column's minimum width small, so the table fits beside the sidebar.
-        <div className="min-w-[10rem] max-w-[16rem]">
-          <p className="line-clamp-2 font-medium text-foreground [overflow-wrap:anywhere]" title={doc.filename}>
-            {doc.filename}
+        <div className="min-w-[12rem] max-w-[18rem]">
+          <p className="truncate font-medium text-foreground" title={doc.filename}>
+            <bdi>{doc.filename}</bdi>
           </p>
-          <p className="text-xs text-muted-foreground">{formatBytes(doc.size_bytes)}</p>
-          <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-            {doc.uploaded_by_email ?? (doc.uploaded_by != null ? `User #${doc.uploaded_by}` : "—")} ·{" "}
-            {formatWhen(doc.created_at)}
+          <p className="truncate text-xs text-muted-foreground" title={doc.uploaded_by_email ?? undefined}>
+            {formatBytes(doc.size_bytes)} · {doc.uploaded_by_email ?? (doc.uploaded_by != null ? `User #${doc.uploaded_by}` : "—")}
           </p>
         </div>
       ),
@@ -317,114 +300,75 @@ export function DocumentImportPage() {
     {
       key: "account",
       header: "Account",
-      render: (doc) => <span className="block max-w-[12rem] break-words">{documentAccountLabel(doc)}</span>,
+      truncate: true,
+      maxWidth: "12rem",
+      cellTitle: (doc) => documentAccountLabel(doc),
+      render: (doc) => <bdi>{documentAccountLabel(doc)}</bdi>,
     },
     {
       key: "queues",
       header: "Queues",
-      render: (doc) =>
-        doc.queue_keys.length === 0 ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          <div className="flex max-w-[12rem] flex-wrap gap-1">
-            {doc.queue_keys.map((key, i) => (
-              <span
-                key={`${key}-${i}`}
-                title={key}
-                className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium leading-4 text-foreground"
-              >
-                {doc.queue_labels[i] || key}
-              </span>
-            ))}
-          </div>
-        ),
+      render: (doc) => <QueueChips queues={doc.queue_keys.map((key, i) => ({ key, label: doc.queue_labels[i] || key }))} />,
     },
     {
       key: "pipeline",
       header: "Pipeline",
-      render: (doc) => (
-        // Wide enough for three pills per line; one line when the table has room.
-        <StagePipeline className="min-w-[12.5rem]" stages={doc.stages} fallbackError={doc.error_message} />
-      ),
+      render: (doc) => <StagePipeline stages={doc.stages} fallbackError={doc.error_message} />,
     },
     {
       key: "status",
       header: "Status",
-      render: (doc) => (
-        <div className="space-y-1">
-          <DocStatusBadge status={doc.status} />
-          {doc.status === "QUEUED" && doc.queue_position != null && (
-            <p className="whitespace-nowrap text-xs text-muted-foreground">#{doc.queue_position} in queue</p>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "updated",
-      header: "Updated",
-      render: (doc) => <span className="block min-w-[5.5rem] text-xs">{formatWhen(doc.updated_at ?? doc.created_at)}</span>,
-    },
-    {
-      key: "actions",
-      header: "Actions",
       render: (doc) => {
-        const can = documentActions(doc);
-        const retrying = retry.isPending && retry.variables === doc.id;
-        const republishing = republish.isPending && republish.variables === doc.id;
-        const busy = retrying || republishing;
+        const busy =
+          (retry.isPending && retry.variables === doc.id) || (republish.isPending && republish.variables === doc.id);
         return (
-          // Row clicks open the details; keep button clicks from also doing that.
-          <div className="flex min-w-[10.5rem] flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
-            <Button variant="outline" size="sm" onClick={() => setDetailsDoc(doc)}>
-              <Eye aria-hidden="true" className="mr-1 h-3.5 w-3.5" /> Details
-            </Button>
-            {can.retry && (
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => runRowAction("retry", doc)}>
-                {retrying ? (
-                  <Loader2 aria-hidden="true" className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
-                )}
-                Retry
-              </Button>
-            )}
-            {can.republish && (
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => runRowAction("republish", doc)}>
-                {republishing ? (
-                  <Loader2 aria-hidden="true" className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Send aria-hidden="true" className="mr-1 h-3.5 w-3.5" />
-                )}
-                Republish
-              </Button>
-            )}
-            {can.changeQueues && (
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => setQueuesDoc(doc)}>
-                <ListChecks aria-hidden="true" className="mr-1 h-3.5 w-3.5" /> Change queues
-              </Button>
-            )}
-            {can.unpublish && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  setUnpublishError(null);
-                  setUnpublishDoc(doc);
-                }}
-              >
-                <Trash2 aria-hidden="true" className="mr-1 h-3.5 w-3.5 text-red-600" /> Unpublish
-              </Button>
+          <div className="space-y-0.5">
+            <DocStatusBadge status={doc.status} />
+            {busy ? (
+              <p className="whitespace-nowrap text-xs text-muted-foreground">Sending…</p>
+            ) : (
+              doc.status === "QUEUED" &&
+              doc.queue_position != null && <p className="whitespace-nowrap text-xs text-muted-foreground">#{doc.queue_position} in queue</p>
             )}
           </div>
         );
       },
     },
+    {
+      key: "updated",
+      header: "Updated",
+      render: (doc) => <RelativeTime value={doc.updated_at ?? doc.created_at} className="text-muted-foreground" />,
+    },
+    actionsColumn<KbDocumentOut>(
+      (doc) => {
+        const can = documentActions(doc);
+        const busy =
+          (retry.isPending && retry.variables === doc.id) || (republish.isPending && republish.variables === doc.id);
+        return [
+          { label: "Details", icon: Eye, onSelect: () => setDetailsDoc(doc) },
+          { label: "Retry", icon: RotateCcw, hidden: !can.retry, disabled: busy, onSelect: () => runRowAction("retry", doc) },
+          { label: "Republish", icon: Send, hidden: !can.republish, disabled: busy, onSelect: () => runRowAction("republish", doc) },
+          { label: "Change queues", icon: ListChecks, hidden: !can.changeQueues, disabled: busy, onSelect: () => setQueuesDoc(doc) },
+          {
+            label: "Unpublish",
+            icon: Trash2,
+            destructive: true,
+            separatorBefore: true,
+            hidden: !can.unpublish,
+            disabled: busy,
+            onSelect: () => {
+              setUnpublishError(null);
+              setUnpublishDoc(doc);
+            },
+          },
+        ];
+      },
+      { label: (doc) => `Actions for ${doc.filename}` },
+    ),
   ];
 
-  const header = (
-    <PageHeader
-      icon={FileUp}
+  const heading = (
+    <PageHeading
       title="Document Import"
       description="Upload PDF and Word documents to an account's knowledge base and publish them to the queues you choose."
     />
@@ -432,28 +376,28 @@ export function DocumentImportPage() {
 
   if (unavailable) {
     return (
-      <div className="space-y-6">
-        {header}
+      <Page width="wide">
+        {heading}
         <Notice tone="danger" title={unavailable.title}>
           {unavailable.message}
         </Notice>
-      </div>
+      </Page>
     );
   }
 
+  const isFiltered = accountFilter !== "ALL" || statusFilter !== "ALL";
+
   return (
-    <div className="space-y-6">
-      {header}
+    <Page width="wide">
+      {heading}
 
       {status.isError && (
         <ErrorAlert message={`Couldn't load the import status: ${formatUserError(status.error)}. Default upload limits apply.`} />
       )}
       {status.data && !status.data.extraction_available && (
         <Notice tone="warning" title="Text extraction is unavailable">
-          <p>{status.data.extraction_unavailable_reason || "The document extractor is not available on the server."}</p>
-          <p className="mt-1">
-            Uploads are still accepted, but documents will fail at the extraction stage until this is fixed.
-          </p>
+          {status.data.extraction_unavailable_reason || "The document extractor is not available on the server."} Uploads are still
+          accepted, but documents will fail at the extraction stage until this is fixed.
         </Notice>
       )}
       {status.data && !status.data.worker_running && (
@@ -462,184 +406,170 @@ export function DocumentImportPage() {
         </Notice>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Import documents</CardTitle>
-          <CardDescription>
-            Each file is extracted, split into chunks, embedded and published to the selected queues of the account's
-            knowledge base.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="space-y-5">
-              <div>
-                <Label htmlFor="doc-import-account">Account</Label>
-                <Select
-                  id="doc-import-account"
-                  value={accountId != null ? String(accountId) : ""}
-                  onChange={(e) => handleAccountChange(e.target.value)}
-                  disabled={accountsLoading || upload.isPending}
-                  className="mt-1"
-                >
-                  <option value="">
-                    {accountsLoading
-                      ? "Loading accounts…"
-                      : corpusAccounts.length
-                        ? "Select an account…"
-                        : "No accounts with a knowledge base"}
-                  </option>
-                  {corpusAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {accountLabel(a)}
-                    </option>
-                  ))}
-                </Select>
-                <p className="mt-1 text-xs text-muted-foreground">Only accounts with a knowledge base are listed.</p>
-              </div>
-
-              {accountId == null ? (
-                <div>
-                  <p className="text-sm font-medium text-slate-700">Queues</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Select an account to choose its queues.</p>
-                </div>
-              ) : (
-                <QueueMultiSelect
-                  queues={queues}
-                  selected={queueKeys}
-                  onChange={setQueueKeys}
-                  loading={kbQueues.isLoading}
-                  error={kbQueues.isError ? formatUserError(kbQueues.error) : null}
-                  disabled={upload.isPending}
-                  label="Publish to queues"
-                />
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-slate-700">Files</p>
-              <FileDropzone
-                files={files}
-                onChange={setFiles}
-                limits={limits}
-                disabled={status.isLoading || upload.isPending}
-                fileStates={fileStates}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <p id="doc-import-upload-hint" className={`text-sm ${progress ? "text-primary" : "text-muted-foreground"}`}>
-              {progress
-                ? `Uploading file ${progressStep} of ${progress.total}${progress.current ? `: ${progress.current.name}` : ""}. Keep this page open until it finishes.`
-                : (uploadBlocker ??
-                  `Ready to upload ${plural(files.length, "file")} to ${plural(selectedQueueCount, "queue")}, one file at a time.`)}
+      <Card className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Import documents</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Each file is extracted, split into chunks, embedded and published to the selected queues of the account's knowledge base.
             </p>
-            <Button
-              onClick={handleUpload}
-              disabled={uploadBlocker != null || upload.isPending}
-              aria-describedby="doc-import-upload-hint"
-              className="shrink-0"
-            >
-              {upload.isPending ? (
-                <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Upload aria-hidden="true" className="mr-2 h-4 w-4" />
-              )}
-              {progress
-                ? `Uploading ${progressStep} of ${progress.total}…`
-                : files.length > 1
-                  ? `Upload ${files.length} files`
-                  : "Upload"}
-            </Button>
           </div>
-          {/* Announces batch progress to screen readers (the visible hint above is not a live region). */}
-          <p className="sr-only" aria-live="polite">
-            {progress ? `Uploading file ${progressStep} of ${progress.total}` : ""}
-          </p>
+        </div>
 
-          <ErrorAlert message={uploadError} />
-          {uploadSummary && <UploadBatchSummary counts={uploadSummary} onDismiss={() => setUploadSummary(null)} />}
-        </CardContent>
-      </Card>
-
-      <section aria-labelledby="doc-import-documents" className="space-y-4">
-        <h2 id="doc-import-documents" className="text-lg font-semibold text-foreground">
-          Documents
-        </h2>
-
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-            <div className="w-full lg:w-72">
-              <Label htmlFor="doc-filter-account">Account</Label>
+        <div className="mt-5 grid gap-6 lg:grid-cols-2">
+          <div className="space-y-5">
+            <Field label="Account" htmlFor="doc-import-account" hint="Only accounts with a knowledge base are listed.">
               <Select
-                id="doc-filter-account"
-                value={accountFilter}
-                onChange={(e) => {
-                  setAccountFilter(e.target.value);
-                  setOffset(0);
-                }}
-                className="mt-1"
+                id="doc-import-account"
+                value={accountId != null ? String(accountId) : ""}
+                onChange={(e) => handleAccountChange(e.target.value)}
+                disabled={accountsLoading || upload.isPending}
               >
-                <option value="ALL">All accounts</option>
+                <option value="">
+                  {accountsLoading ? "Select an account…" : corpusAccounts.length ? "Select an account…" : "No accounts with a knowledge base"}
+                </option>
                 {corpusAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {accountLabel(a)}
                   </option>
                 ))}
               </Select>
-            </div>
-            <div className="w-full lg:w-48">
-              <Label htmlFor="doc-filter-status">Status</Label>
-              <Select
-                id="doc-filter-status"
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setOffset(0);
-                }}
-                className="mt-1"
-              >
-                <option value="ALL">All statuses</option>
-                {DOC_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {DOC_STATUS_LABELS[s]}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {(accountFilter !== "ALL" || statusFilter !== "ALL") && (
-              <Button type="button" variant="outline" onClick={clearFilters} className="lg:mb-0.5">
-                Clear filters
-              </Button>
+            </Field>
+
+            {accountId == null ? (
+              <div className="space-y-1">
+                <p className="text-ui font-medium text-foreground">Publish to queues</p>
+                <p className="text-sm text-muted-foreground">Select an account to choose its queues.</p>
+              </div>
+            ) : (
+              <QueueMultiSelect
+                queues={queues}
+                selected={queueKeys}
+                onChange={setQueueKeys}
+                loading={kbQueues.isLoading}
+                error={kbQueues.isError ? formatUserError(kbQueues.error) : null}
+                disabled={upload.isPending}
+                label="Publish to queues"
+              />
             )}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground" aria-live="polite">
-            {list.data ? plural(total, "document") : list.isLoading ? "Loading documents…" : "—"}
-            {anyActive ? " · refreshing every 3 s while documents are processing" : ""}
-          </p>
+
+          <div className="space-y-1.5">
+            <p className="text-ui font-medium text-foreground">Files</p>
+            <FileDropzone files={files} onChange={setFiles} limits={limits} disabled={status.isLoading || upload.isPending} fileStates={fileStates} />
+          </div>
         </div>
 
-        <ErrorAlert message={actionError} />
+        <div className="mt-5 space-y-3 border-t border-border pt-4">
+          {progress && (
+            <Progress value={progress.done} max={progress.total || 1} label="Upload progress" size="sm" />
+          )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p id="doc-import-upload-hint" className={cn("text-sm", progress ? "text-foreground" : "text-muted-foreground")}>
+              {progress ? (
+                <>
+                  Uploading file {progressStep} of {progress.total}
+                  {progress.current ? (
+                    <>
+                      : <bdi className="font-medium">{progress.current.name}</bdi>
+                    </>
+                  ) : null}
+                  . Keep this page open until it finishes.
+                </>
+              ) : (
+                (uploadBlocker ?? `Ready to upload ${plural(files.length, "file")} to ${plural(selectedQueueCount, "queue")}, one file at a time.`)
+              )}
+            </p>
+            <Button
+              onClick={handleUpload}
+              disabled={uploadBlocker != null}
+              loading={upload.isPending}
+              aria-describedby="doc-import-upload-hint"
+              className="shrink-0"
+            >
+              {!upload.isPending && <Upload aria-hidden="true" className="h-4 w-4" />}
+              {progress ? `Uploading ${progressStep} of ${progress.total}…` : files.length > 1 ? `Upload ${files.length} files` : "Upload"}
+            </Button>
+          </div>
+          {/* Announces batch progress to screen readers (the visible hint above is not a live region). */}
+          <p className="sr-only" aria-live="polite">
+            {progress ? `Uploading file ${progressStep} of ${progress.total}` : ""}
+          </p>
+          <ErrorAlert message={uploadError} />
+          {uploadSummary && <UploadBatchSummary counts={uploadSummary} onDismiss={() => setUploadSummary(null)} />}
+        </div>
+      </Card>
+
+      <section aria-labelledby="doc-import-documents" className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="doc-import-documents" className="text-base font-semibold text-foreground">
+            Documents
+          </h2>
+        </div>
+
         <ErrorAlert message={list.isError ? `Couldn't load documents: ${formatUserError(list.error)}` : null} />
 
         {/* While another page/filter loads, the previous rows stay visible but dimmed. */}
-        <div aria-busy={list.isPlaceholderData} className={`transition-opacity ${list.isPlaceholderData ? "opacity-60" : ""}`}>
-          <DataTable
+        <div aria-busy={list.isPlaceholderData || undefined} className={cn("transition-opacity", list.isPlaceholderData && "opacity-60")}>
+          <DataTable<KbDocumentOut>
+            aria-label="Documents"
             columns={columns}
             data={documents}
             keyFn={(doc) => doc.id}
             loading={list.isLoading}
-            emptyMessage={
-              accountFilter !== "ALL" || statusFilter !== "ALL"
-                ? "No documents match these filters."
-                : "No documents imported yet."
-            }
+            itemLabel="documents"
             onRowClick={(doc) => setDetailsDoc(doc)}
+            rowLabel={(doc) => doc.filename}
+            pagination={{
+              mode: "server",
+              page: Math.floor(offset / PAGE_SIZE) + 1,
+              pageSize: PAGE_SIZE,
+              total,
+              onPageChange: (page) => setOffset((page - 1) * PAGE_SIZE),
+            }}
+            empty={
+              isFiltered
+                ? {
+                    title: "No documents match these filters",
+                    action: (
+                      <Button variant="outline" size="sm" onClick={clearFilters}>
+                        Clear filters
+                      </Button>
+                    ),
+                  }
+                : { icon: FileText, title: "No documents imported yet", description: "Upload PDF or DOCX files above to add them to a knowledge base." }
+            }
+            toolbarEnd={anyActive ? <AutoRefreshIndicator intervalMs={ACTIVE_REFRESH_MS} fetching={list.isFetching} /> : undefined}
+            toolbar={
+              <FilterBar
+                filters={[
+                  {
+                    id: "doc-filter-account",
+                    label: "Account",
+                    value: accountFilter,
+                    onChange: (v) => {
+                      setAccountFilter(v);
+                      setOffset(0);
+                    },
+                    className: "max-w-[22rem]",
+                    options: [{ value: "ALL", label: "All" }, ...corpusAccounts.map((a) => ({ value: String(a.id), label: accountLabel(a) }))],
+                  },
+                  {
+                    id: "doc-filter-status",
+                    label: "Status",
+                    value: statusFilter,
+                    onChange: (v) => {
+                      setStatusFilter(v);
+                      setOffset(0);
+                    },
+                    options: [{ value: "ALL", label: "All" }, ...DOC_STATUSES.map((s) => ({ value: s, label: DOC_STATUS_LABELS[s] }))],
+                  },
+                ]}
+                onClear={clearFilters}
+              />
+            }
           />
         </div>
-
-        <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />
       </section>
 
       {detailsDoc && <DocumentDetailsDialog document={detailsDoc} onClose={() => setDetailsDoc(null)} />}
@@ -653,6 +583,7 @@ export function DocumentImportPage() {
             : ""
         }
         confirmLabel="Unpublish"
+        loadingLabel="Unpublishing…"
         destructive
         loading={unpublish.isPending}
         error={unpublishError}
@@ -663,6 +594,6 @@ export function DocumentImportPage() {
           setUnpublishError(null);
         }}
       />
-    </div>
+    </Page>
   );
 }

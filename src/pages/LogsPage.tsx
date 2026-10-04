@@ -1,124 +1,92 @@
-import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, RefreshCw, ScrollText } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AlertCircle, Building2, History, KeyRound, RefreshCw, Search, Sparkles, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { ROLES } from "@/lib/roles";
-import { useAccounts } from "@/hooks/useAccounts";
 import { useAgentMetrics } from "@/hooks/useAnalytics";
 import { useActivityLogs, useAiRequestLogs, useRagLogs, useSignInLogs } from "@/hooks/useLogs";
-import { PageHeader } from "@/components/shared/PageHeader";
+import { filterRows } from "@/lib/table-filters";
+import { formatUserError } from "@/lib/errors";
+import { formatDurationMs, formatNumber } from "@/lib/format";
+import { Page, PageHeading } from "@/components/shell/page";
+import { DataTable, type Column, type DataTableEmpty } from "@/components/data/data-table";
+import { FilterBar } from "@/components/data/filter-bar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ErrorLogsPanel } from "@/components/logs/ErrorLogsPanel";
 import { FailureReasonsPopover } from "@/components/logs/FailureReasonsPopover";
 import { AiMetricsPanel } from "@/components/logs/AiMetricsPanel";
 import { ApiRequestsPanel } from "@/components/logs/ApiRequestsPanel";
+import { LogDetailsSheet } from "@/components/logs/LogDetailsSheet";
+import { LogResultStatus, LogSourceBadge, LogTime, SignInEventStatus } from "@/components/logs/log-cells";
+import { AutoRefreshIndicator } from "@/components/system/AutoRefreshIndicator";
 import { SystemComponentsSection } from "@/components/system/SystemComponentsSection";
 import { SystemResourcesSection } from "@/components/system/SystemResourcesSection";
-import { DataTable, type Column } from "@/components/shared/DataTable";
-import { TableFilters } from "@/components/shared/TableFilters";
-import { filterRows } from "@/lib/table-filters";
-import { formatUserError } from "@/lib/errors";
-import { Button } from "@/components/ui/button";
-import { ErrorAlert } from "@/components/shared/ErrorAlert";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AgentMetric, AiRequest, AuditLog, HttpRequestLog, RagRetrieval, SignInLog } from "@/types/api";
 
 type TabId = "activity" | "sign-in" | "agents" | "api" | "rag" | "ai-requests" | "errors" | "system";
 
 type LogRow = AuditLog | SignInLog | AgentMetric | RagRetrieval | AiRequest | HttpRequestLog;
 
-function formatWhen(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-}
-
-function snippet(text: string | null | undefined, max = 80): string {
-  if (!text) return "—";
-  const t = text.replace(/\s+/g, " ").trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
-}
-
-/** Pretty-print when the value is valid JSON; fall back to the raw string when it isn't. */
-function formatJson(raw: string): { text: string; count: number | null } {
-  try {
-    const parsed = JSON.parse(raw);
-    return {
-      text: JSON.stringify(parsed, null, 2),
-      count: Array.isArray(parsed) ? parsed.length : null,
-    };
-  } catch {
-    return { text: raw, count: null };
-  }
-}
-
-function CollapsibleJsonValue({ value }: { value: string }) {
-  const [open, setOpen] = useState(false);
-  const { text, count } = useMemo(() => formatJson(value), [value]);
-  const label = count != null ? `${count} ${count === 1 ? "chunk" : "chunks"}` : `${text.length} characters`;
-
-  return (
-    <div className="mt-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        className="flex items-center gap-1.5 text-sm font-medium text-primary transition-colors hover:text-primary/80"
-        onClick={() => setOpen((prev) => !prev)}
-      >
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span>{open ? "Hide" : "Show"}</span>
-        <span className="font-normal text-slate-500">({label})</span>
-      </button>
-      {open && (
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-900">
-          {text}
-        </pre>
-      )}
-    </div>
-  );
-}
+/** Display only: mirrors LIVE_LOG_REFETCH_MS in hooks/useLogs (retrievals and AI requests poll every 10 s). */
+const LIVE_LOGS_REFRESH_MS = 10_000;
 
 function agentLabel(row: AgentMetric): string {
   const name = [row.agent_first_name, row.agent_last_name].filter(Boolean).join(" ").trim();
   return name || row.agent_email || `User #${row.user_id}`;
 }
 
-function RefreshButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
-  return (
-    <div className="flex items-center justify-end gap-2">
-      <span className="text-xs text-muted-foreground">Auto-refreshes every 10s</span>
-      <Button variant="outline" size="sm" onClick={onClick} disabled={busy}>
-        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
-        Refresh
+function humanizeToken(value: string | null | undefined): string {
+  const text = (value ?? "").replace(/[_-]+/g, " ").trim().toLowerCase();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "—";
+}
+
+function loadError(title: string, error: unknown, retry: () => void): DataTableEmpty {
+  return {
+    icon: AlertCircle,
+    title,
+    description: formatUserError(error),
+    action: (
+      <Button variant="outline" size="sm" onClick={retry}>
+        Try again
       </Button>
+    ),
+  };
+}
+
+function RefreshAction({ label, onClick, busy, intervalMs }: { label: string; onClick: () => void; busy: boolean; intervalMs?: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      {intervalMs != null && <AutoRefreshIndicator intervalMs={intervalMs} fetching={busy} />}
+      <IconButton
+        label={label}
+        icon={RefreshCw}
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        className={busy ? "[&_svg]:motion-safe:animate-spin" : undefined}
+        onClick={onClick}
+      />
     </div>
   );
 }
 
-function SourceBadge({ value }: { value: string | null | undefined }) {
-  const isWidget = (value ?? "").toUpperCase() === "WIDGET";
-  const label = isWidget ? "Widget" : "Agent";
-  const tone = isWidget ? "bg-violet-100 text-violet-700" : "bg-sky-100 text-sky-700";
-  return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>{label}</span>;
-}
-
-function StatusBadge({ value }: { value: string | null | undefined }) {
-  const v = (value ?? "").toUpperCase();
-  const tone =
-    v === "SUCCESS"
-      ? "bg-emerald-100 text-emerald-700"
-      : v === "FAILED"
-        ? "bg-red-100 text-red-700"
-        : v === "EMPTY"
-          ? "bg-amber-100 text-amber-700"
-          : "bg-slate-100 text-slate-600";
+function TabIntro({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>{v || "—"}</span>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-sm text-muted-foreground">{children}</p>
+      {aside}
+    </div>
   );
 }
 
 export function LogsPage() {
   const { user } = useAuth();
+  const workspace = useWorkspace();
+  const [searchParams] = useSearchParams();
   const isSuperAdmin = user?.roles.includes(ROLES.SUPER_ADMIN) ?? false;
   const isOrgAdmin = user?.roles.includes(ROLES.ORG_ADMIN) ?? false;
   const isSupervisor = user?.roles.includes(ROLES.SUPERVISOR) ?? false;
@@ -127,11 +95,11 @@ export function LogsPage() {
 
   const canSeeAiLogs = isSuperAdmin || isOrgAdmin || isDeveloper;
   const tabs: { id: TabId; label: string; show: boolean }[] = [
-    { id: "activity", label: "Activity", show: isSuperAdmin || isOrgAdmin || isSupervisor },
-    { id: "sign-in", label: "Sign-in", show: isSuperAdmin || isOrgAdmin },
+    { id: "activity", label: "Activity audit", show: isSuperAdmin || isOrgAdmin || isSupervisor },
+    { id: "sign-in", label: "Sign-in events", show: isSuperAdmin || isOrgAdmin },
     { id: "agents", label: "Agent activity", show: isSuperAdmin || isOrgAdmin || isSupervisor || isAccountManager },
     { id: "api", label: "API requests", show: canSeeAiLogs },
-    { id: "rag", label: "RAG retrieval", show: canSeeAiLogs },
+    { id: "rag", label: "Knowledge search", show: canSeeAiLogs },
     { id: "ai-requests", label: "AI requests", show: canSeeAiLogs },
     { id: "errors", label: "Error logs", show: canSeeAiLogs },
     { id: "system", label: "System health", show: isSuperAdmin || isDeveloper },
@@ -140,17 +108,17 @@ export function LogsPage() {
   const [tab, setTab] = useState<TabId>(visibleTabs[0]?.id ?? "activity");
   const [selectedRow, setSelectedRow] = useState<LogRow | null>(null);
 
-  const { data: accounts = [] } = useAccounts(isSuperAdmin ? null : user?.organization_id);
-  const [accountId, setAccountId] = useState<number | null>(null);
-  const selectedAccountId = accountId ?? accounts[0]?.id ?? null;
+  // Same list the page loaded before the shell existed: useAccounts(isSuperAdmin ? null : org).
+  const accounts = workspace.accounts;
+  const selectedAccountId = workspace.accountId;
   const [activityAccountFilter, setActivityAccountFilter] = useState("ALL");
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [actionFilter, setActionFilter] = useState("ALL");
   const [entityFilter, setEntityFilter] = useState("ALL");
   const [eventFilter, setEventFilter] = useState("ALL");
 
-  const { data: activityData, isLoading: activityLoading, isError: activityError, error: activityLoadError } = useActivityLogs(
+  const activity = useActivityLogs(
     {
       account_id: activityAccountFilter === "ALL" ? undefined : Number(activityAccountFilter),
       action_type: actionFilter === "ALL" ? undefined : actionFilter,
@@ -158,150 +126,199 @@ export function LogsPage() {
     },
     tab === "activity",
   );
-  const { data: signInData, isLoading: signInLoading, isError: signInError, error: signInLoadError } = useSignInLogs(
-    { event_type: eventFilter === "ALL" ? undefined : eventFilter },
-    tab === "sign-in",
-  );
-  const { data: agentMetrics = [], isLoading: agentsLoading } = useAgentMetrics(
-    selectedAccountId,
-    tab === "agents" && selectedAccountId != null,
-  );
-  const {
-    data: ragData,
-    isLoading: ragLoading,
-    isError: ragError,
-    error: ragLoadError,
-    refetch: refetchRag,
-    isFetching: ragFetching,
-  } = useRagLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "rag");
-  const {
-    data: aiData,
-    isLoading: aiLoading,
-    isError: aiError,
-    error: aiLoadError,
-    refetch: refetchAi,
-    isFetching: aiFetching,
-  } = useAiRequestLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "ai-requests");
+  const signIn = useSignInLogs({ event_type: eventFilter === "ALL" ? undefined : eventFilter }, tab === "sign-in");
+  const agents = useAgentMetrics(selectedAccountId, tab === "agents" && selectedAccountId != null);
+  const agentMetrics = useMemo(() => agents.data ?? [], [agents.data]);
+  const rag = useRagLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "rag");
+  const ai = useAiRequestLogs({ status: eventFilter === "ALL" ? undefined : eventFilter }, tab === "ai-requests");
 
   const activityRows = useMemo(
     () =>
-      filterRows(
-        activityData?.items ?? [],
-        search,
-        (r) =>
-          [
-            r.summary ?? "",
-            r.actor_email ?? "",
-            r.action_type,
-            r.entity_type,
-            r.entity_id,
-            r.new_value ?? "",
-            r.ip_address ?? "",
-          ].join(" "),
+      filterRows(activity.data?.items ?? [], search, (r) =>
+        [r.summary ?? "", r.actor_email ?? "", r.action_type, r.entity_type, r.entity_id, r.new_value ?? "", r.ip_address ?? ""].join(" "),
       ),
-    [activityData, search],
+    [activity.data, search],
   );
 
   const signInRows = useMemo(
     () =>
-      filterRows(
-        signInData?.items ?? [],
-        search,
-        (r) => [r.summary ?? "", r.user_email ?? "", r.event_type, r.ip_address ?? "", r.user_agent ?? ""].join(" "),
+      filterRows(signIn.data?.items ?? [], search, (r) =>
+        [r.summary ?? "", r.user_email ?? "", r.event_type, r.ip_address ?? "", r.user_agent ?? ""].join(" "),
       ),
-    [signInData, search],
+    [signIn.data, search],
   );
 
   const agentRows = useMemo(
     () =>
-      filterRows(
-        agentMetrics,
-        search,
-        (r) => [agentLabel(r), r.agent_email ?? "", String(r.ai_usage_count ?? ""), String(r.escalation_count ?? "")].join(" "),
+      filterRows(agentMetrics, search, (r) =>
+        [agentLabel(r), r.agent_email ?? "", String(r.ai_usage_count ?? ""), String(r.escalation_count ?? "")].join(" "),
       ),
     [agentMetrics, search],
   );
 
   const ragRows = useMemo(
     () =>
-      filterRows(
-        ragData?.items ?? [],
-        search,
-        (r) => [r.summary ?? "", r.query_text ?? "", r.status, r.account_name ?? "", r.error_message ?? ""].join(" "),
+      filterRows(rag.data?.items ?? [], search, (r) =>
+        [r.summary ?? "", r.query_text ?? "", r.status, r.account_name ?? "", r.error_message ?? ""].join(" "),
       ),
-    [ragData, search],
+    [rag.data, search],
   );
 
   const aiRows = useMemo(
     () =>
-      filterRows(
-        aiData?.items ?? [],
-        search,
-        (r) => [r.summary ?? "", r.model_name ?? "", r.provider ?? "", r.status ?? "", r.account_name ?? "", r.error_message ?? ""].join(" "),
+      filterRows(ai.data?.items ?? [], search, (r) =>
+        [r.summary ?? "", r.model_name ?? "", r.provider ?? "", r.status ?? "", r.account_name ?? "", r.error_message ?? ""].join(" "),
       ),
-    [aiData, search],
+    [ai.data, search],
   );
 
   const activityColumns: Column<AuditLog>[] = [
-    { key: "when", header: "When", sortable: true, sortValue: (r) => r.created_at ?? "", render: (r) => formatWhen(r.created_at) },
-    { key: "actor", header: "Actor", render: (r) => r.actor_email ?? (r.user_id ? `#${r.user_id}` : "—") },
+    { key: "created_at", header: "Time", sortable: true, render: (r) => <LogTime value={r.created_at} /> },
+    {
+      key: "actor",
+      header: "Actor",
+      truncate: true,
+      maxWidth: "14rem",
+      render: (r) => r.actor_email ?? (r.user_id ? `#${r.user_id}` : "—"),
+    },
+    { key: "action_type", header: "Action", render: (r) => <Badge variant="neutral">{humanizeToken(r.action_type)}</Badge> },
+    {
+      key: "entity",
+      header: "Entity",
+      render: (r) => (
+        <span className="whitespace-nowrap">
+          {humanizeToken(r.entity_type)} <span className="font-mono text-xs text-muted-foreground">#{r.entity_id}</span>
+        </span>
+      ),
+    },
     {
       key: "summary",
       header: "Summary",
-      render: (r) => r.summary ?? `${r.action_type} ${r.entity_type} #${r.entity_id}`,
+      truncate: true,
+      maxWidth: "32rem",
+      cellTitle: (r) => r.summary ?? undefined,
+      render: (r) => <span dir="auto">{r.summary ?? `${r.action_type} ${r.entity_type} #${r.entity_id}`}</span>,
     },
-    { key: "ip", header: "IP", render: (r) => r.ip_address ?? "—" },
+    { key: "ip_address", header: "IP", render: (r) => <span className="font-mono text-xs">{r.ip_address ?? "—"}</span> },
   ];
 
   const signInColumns: Column<SignInLog>[] = [
-    { key: "when", header: "When", sortable: true, sortValue: (r) => r.created_at ?? "", render: (r) => formatWhen(r.created_at) },
-    { key: "summary", header: "Summary", render: (r) => r.summary ?? `${r.user_email ?? `#${r.user_id}`} ${r.event_type}` },
-    { key: "device", header: "Device", render: (r) => snippet(r.user_agent, 60) },
+    { key: "created_at", header: "Time", sortable: true, render: (r) => <LogTime value={r.created_at} /> },
+    { key: "event_type", header: "Event", sortable: true, render: (r) => <SignInEventStatus value={r.event_type} /> },
+    {
+      key: "user_email",
+      header: "User",
+      truncate: true,
+      maxWidth: "16rem",
+      render: (r) => r.user_email ?? (r.user_id ? `#${r.user_id}` : "—"),
+    },
+    {
+      key: "summary",
+      header: "Summary",
+      truncate: true,
+      maxWidth: "26rem",
+      render: (r) => r.summary ?? `${r.user_email ?? `#${r.user_id}`} ${r.event_type}`,
+    },
+    { key: "ip_address", header: "IP", render: (r) => <span className="font-mono text-xs">{r.ip_address ?? "—"}</span> },
+    { key: "user_agent", header: "Device", truncate: true, maxWidth: "16rem", render: (r) => r.user_agent ?? "—" },
   ];
 
   const agentColumns: Column<AgentMetric>[] = [
-    { key: "agent", header: "Agent", sortable: true, sortValue: (r) => agentLabel(r), render: (r) => agentLabel(r) },
-    { key: "email", header: "Email", render: (r) => r.agent_email ?? "—" },
-    { key: "ai", header: "AI requests", sortable: true, sortValue: (r) => r.ai_usage_count ?? -1, render: (r) => String(r.ai_usage_count ?? "—") },
-    { key: "success", header: "Successful answers", sortable: true, sortValue: (r) => r.successful_answers ?? -1, render: (r) => String(r.successful_answers ?? "—") },
     {
-      key: "failed",
-      header: "Failed answers",
+      key: "agent",
+      header: "Agent",
       sortable: true,
-      sortValue: (r) => r.failed_answers ?? -1,
+      sortValue: (r) => agentLabel(r).toLowerCase(),
+      render: (r) => {
+        const name = agentLabel(r);
+        return (
+          <div className="min-w-0 max-w-[18rem]">
+            <p className="truncate font-medium text-foreground" title={name}>
+              <bdi>{name}</bdi>
+            </p>
+            {r.agent_email && r.agent_email !== name && <p className="truncate text-xs text-muted-foreground">{r.agent_email}</p>}
+          </div>
+        );
+      },
+    },
+    { key: "ai_usage_count", header: "AI requests", numeric: true, sortable: true, render: (r) => formatNumber(r.ai_usage_count) },
+    { key: "successful_answers", header: "Successful", numeric: true, sortable: true, render: (r) => formatNumber(r.successful_answers) },
+    {
+      key: "failed_answers",
+      header: "Failed",
+      numeric: true,
+      sortable: true,
       render: (r) => {
         const n = r.failed_answers ?? 0;
+        if (n <= 0) return formatNumber(r.failed_answers);
         return (
-          <span className="inline-flex items-center gap-1.5">
-            <span className={n > 0 ? "font-semibold text-red-600" : ""}>{String(r.failed_answers ?? "—")}</span>
-            {n > 0 && <FailureReasonsPopover reasons={r.failure_reasons} />}
+          <span className="inline-flex items-center justify-end gap-1">
+            <FailureReasonsPopover reasons={r.failure_reasons} />
+            <span className="font-medium text-danger">{formatNumber(n)}</span>
           </span>
         );
       },
     },
-    { key: "esc", header: "Escalations", render: (r) => String(r.escalation_count ?? "—") },
-    { key: "avg", header: "Avg response (ms)", render: (r) => (r.avg_response_time != null ? r.avg_response_time.toFixed(2) : "—") },
+    { key: "escalation_count", header: "Escalations", numeric: true, sortable: true, render: (r) => formatNumber(r.escalation_count) },
+    { key: "avg_response_time", header: "Avg response", numeric: true, sortable: true, render: (r) => formatDurationMs(r.avg_response_time) },
   ];
 
   const ragColumns: Column<RagRetrieval>[] = [
-    { key: "when", header: "When", sortable: true, sortValue: (r) => r.created_at ?? "", render: (r) => formatWhen(r.created_at) },
-    { key: "source", header: "Source", render: (r) => <SourceBadge value={r.source} /> },
-    { key: "status", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
-    { key: "query", header: "Query", render: (r) => snippet(r.query_text, 70) },
-    { key: "chunks", header: "Chunks", render: (r) => String(r.chunks_returned ?? "—") },
-    { key: "score", header: "Top score", sortable: true, sortValue: (r) => r.top_score ?? -1, render: (r) => (r.top_score != null ? r.top_score.toFixed(3) : "—") },
-    { key: "ms", header: "Retrieval (ms)", render: (r) => String(r.retrieval_ms ?? "—") },
-    { key: "account", header: "Account", render: (r) => r.account_name ?? (r.account_id ? `#${r.account_id}` : "—") },
+    { key: "created_at", header: "Time", sortable: true, render: (r) => <LogTime value={r.created_at} /> },
+    { key: "status", header: "Result", sortable: true, render: (r) => <LogResultStatus value={r.status} /> },
+    { key: "source", header: "Source", render: (r) => <LogSourceBadge value={r.source} /> },
+    {
+      key: "query_text",
+      header: "Query",
+      truncate: true,
+      maxWidth: "26rem",
+      cellTitle: (r) => r.query_text ?? undefined,
+      render: (r) => <span dir="auto">{r.query_text ?? "—"}</span>,
+    },
+    { key: "chunks_returned", header: "Chunks", numeric: true, sortable: true, render: (r) => formatNumber(r.chunks_returned) },
+    {
+      key: "top_score",
+      header: "Top score",
+      numeric: true,
+      sortable: true,
+      render: (r) => (r.top_score != null ? r.top_score.toFixed(3) : "—"),
+    },
+    { key: "retrieval_ms", header: "Retrieval", numeric: true, sortable: true, render: (r) => formatDurationMs(r.retrieval_ms) },
+    {
+      key: "account",
+      header: "Account",
+      truncate: true,
+      maxWidth: "12rem",
+      render: (r) => (r.account_name ? <bdi>{r.account_name}</bdi> : r.account_id ? `#${r.account_id}` : "—"),
+    },
   ];
 
   const aiColumns: Column<AiRequest>[] = [
-    { key: "id", header: "Request", sortable: true, sortValue: (r) => r.id, render: (r) => `#${r.id}` },
-    { key: "source", header: "Source", render: (r) => <SourceBadge value={r.source} /> },
-    { key: "status", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
-    { key: "model", header: "Model", render: (r) => snippet(r.model_name, 40) },
-    { key: "tokens", header: "Tokens (in→out)", render: (r) => `${r.input_tokens ?? 0}→${r.output_tokens ?? 0}` },
-    { key: "ms", header: "Latency (ms)", render: (r) => String(r.response_time_ms ?? "—") },
-    { key: "account", header: "Account", render: (r) => r.account_name ?? (r.account_id ? `#${r.account_id}` : "—") },
+    { key: "id", header: "Request", sortable: true, render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
+    { key: "created_at", header: "Time", sortable: true, render: (r) => <LogTime value={r.created_at} /> },
+    { key: "status", header: "Result", sortable: true, render: (r) => <LogResultStatus value={r.status} /> },
+    { key: "source", header: "Source", render: (r) => <LogSourceBadge value={r.source} /> },
+    {
+      key: "model_name",
+      header: "Model",
+      truncate: true,
+      maxWidth: "16rem",
+      render: (r) => <span className="font-mono text-xs">{r.model_name ?? "—"}</span>,
+    },
+    {
+      key: "tokens",
+      header: "Tokens in → out",
+      numeric: true,
+      render: (r) => `${formatNumber(r.input_tokens ?? 0)} → ${formatNumber(r.output_tokens ?? 0)}`,
+    },
+    { key: "response_time_ms", header: "Latency", numeric: true, sortable: true, render: (r) => formatDurationMs(r.response_time_ms) },
+    {
+      key: "account",
+      header: "Account",
+      truncate: true,
+      maxWidth: "12rem",
+      render: (r) => (r.account_name ? <bdi>{r.account_name}</bdi> : r.account_id ? `#${r.account_id}` : "—"),
+    },
   ];
 
   function clearFilters() {
@@ -311,307 +328,325 @@ export function LogsPage() {
     setEventFilter("ALL");
   }
 
-  function renderDetails(row: LogRow | null) {
-    if (!row) return null;
-
-    const entries = Object.entries(row)
-      .filter(([, value]) => value != null)
-      .map(([key, value]) => ({ key, value }));
-
-    return (
-      <div className="space-y-3">
-        {entries.map(({ key, value }) => (
-          <div key={key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">{key.replace(/_/g, " ")}</div>
-            {key === "chunks_json" ? (
-              <CollapsibleJsonValue value={String(value)} />
-            ) : (
-              <div className="whitespace-pre-wrap break-words text-sm text-slate-900">{String(value)}</div>
-            )}
-          </div>
-        ))}
-      </div>
-    );
+  function changeTab(next: string) {
+    setTab(next as TabId);
+    clearFilters();
   }
 
-  const showAccountPicker = tab === "agents";
-  const showActivityAccountFilter = tab === "activity" && accounts.length > 0;
+  const filtered = (total: number, shown: number) => (shown !== total ? total : undefined);
+  const noMatch: DataTableEmpty = {
+    title: "No entries match these filters",
+    action: (
+      <Button variant="outline" size="sm" onClick={clearFilters}>
+        Clear filters
+      </Button>
+    ),
+  };
+  const anyFilter = search.trim() !== "" || actionFilter !== "ALL" || entityFilter !== "ALL" || eventFilter !== "ALL";
+
+  const statusOptions = (withEmpty: boolean) => [
+    { value: "ALL", label: "All" },
+    { value: "SUCCESS", label: "Success" },
+    ...(withEmpty ? [{ value: "EMPTY", label: "Empty (no chunks)" }] : []),
+    { value: "FAILED", label: "Failed" },
+  ];
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        icon={ScrollText}
-        title="Logs / System health"
-        description="Activity audit, sign-in security, agent usage, API traffic, RAG retrievals, AI requests, error diagnostics, and system health."
+    <Page width="wide">
+      <PageHeading
+        title="Logs & Health"
+        description="Activity audit, sign-in security, agent usage, API traffic, knowledge search, AI requests, errors and system health."
       />
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        {visibleTabs.map((t) => (
-          <Button
-            key={t.id}
-            variant={tab === t.id ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setTab(t.id);
-              clearFilters();
-            }}
-          >
-            {t.label}
-          </Button>
-        ))}
-      </div>
-
-      {showActivityAccountFilter && (
-        <div className="min-w-[240px]">
-          <Label>Account filter</Label>
-          <Select
-            value={activityAccountFilter}
-            onChange={(e) => setActivityAccountFilter(e.target.value)}
-            className="mt-1"
-          >
-            <option value="ALL">All accounts (org-wide activity)</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} only
-              </option>
+      {visibleTabs.length === 0 ? null : (
+        <Tabs value={tab} onValueChange={changeTab}>
+          <TabsList aria-label="Log views">
+            {visibleTabs.map((t) => (
+              <TabsTrigger key={t.id} value={t.id}>
+                {t.label}
+              </TabsTrigger>
             ))}
-          </Select>
-          <p className="mt-1 text-xs text-muted-foreground">
-            User and org changes appear under all accounts; trainee/account assignments appear when filtered.
-          </p>
-        </div>
+          </TabsList>
+
+          <TabsContent value="activity" className="space-y-3">
+            <TabIntro>
+              Changes made in the console. Pick an account to include its trainee and account assignments.
+            </TabIntro>
+            <DataTable<AuditLog>
+              aria-label="Activity audit"
+              columns={activityColumns}
+              data={activity.isError ? [] : activityRows}
+              keyFn={(r) => r.id}
+              loading={activity.isLoading}
+              density="compact"
+              itemLabel="entries"
+              defaultSort={{ key: "created_at", dir: "desc" }}
+              onRowClick={(row) => setSelectedRow(row)}
+              empty={
+                activity.isError
+                  ? loadError("Couldn't load activity", activity.error, () => void activity.refetch())
+                  : anyFilter || activityAccountFilter !== "ALL"
+                    ? noMatch
+                    : { icon: History, title: "No activity recorded yet" }
+              }
+              toolbarEnd={<RefreshAction label="Refresh activity" busy={activity.isFetching} onClick={() => void activity.refetch()} />}
+              toolbar={
+                <FilterBar
+                  search={search}
+                  onSearchChange={setSearch}
+                  searchPlaceholder="Search activity…"
+                  filters={[
+                    {
+                      id: "log-account",
+                      label: "Account",
+                      value: activityAccountFilter,
+                      onChange: setActivityAccountFilter,
+                      hidden: accounts.length === 0,
+                      options: [
+                        { value: "ALL", label: "All (org-wide)" },
+                        ...accounts.map((a) => ({ value: String(a.id), label: `${a.name} only` })),
+                      ],
+                    },
+                    {
+                      id: "log-action",
+                      label: "Action",
+                      value: actionFilter,
+                      onChange: setActionFilter,
+                      options: [
+                        { value: "ALL", label: "All" },
+                        { value: "CREATE", label: "Create" },
+                        { value: "CREATE_TRAINEE", label: "Create trainee" },
+                        { value: "UPDATE", label: "Update" },
+                        { value: "DELETE", label: "Delete" },
+                        { value: "ASSIGN", label: "Assign" },
+                        { value: "UNASSIGN", label: "Unassign" },
+                      ],
+                    },
+                    {
+                      id: "log-entity",
+                      label: "Entity",
+                      value: entityFilter,
+                      onChange: setEntityFilter,
+                      options: [
+                        { value: "ALL", label: "All" },
+                        { value: "user", label: "User" },
+                        { value: "account_user", label: "Account user" },
+                        { value: "account", label: "Account" },
+                        { value: "organization", label: "Organization" },
+                      ],
+                    },
+                  ]}
+                  onClear={() => {
+                    clearFilters();
+                    setActivityAccountFilter("ALL");
+                  }}
+                  isFiltered={anyFilter || activityAccountFilter !== "ALL"}
+                  totalCount={filtered(activity.data?.items.length ?? 0, activityRows.length)}
+                  filteredCount={activityRows.length}
+                  itemLabel="entries"
+                />
+              }
+            />
+          </TabsContent>
+
+          <TabsContent value="sign-in" className="space-y-3">
+            <TabIntro>Sign-ins, failed attempts, lockouts, OTP checks and password resets.</TabIntro>
+            <DataTable<SignInLog>
+              aria-label="Sign-in events"
+              columns={signInColumns}
+              data={signIn.isError ? [] : signInRows}
+              keyFn={(r) => r.id}
+              loading={signIn.isLoading}
+              density="compact"
+              itemLabel="events"
+              defaultSort={{ key: "created_at", dir: "desc" }}
+              onRowClick={(row) => setSelectedRow(row)}
+              empty={
+                signIn.isError
+                  ? loadError("Couldn't load sign-in events", signIn.error, () => void signIn.refetch())
+                  : anyFilter
+                    ? noMatch
+                    : { icon: KeyRound, title: "No sign-in events recorded" }
+              }
+              toolbarEnd={<RefreshAction label="Refresh sign-in events" busy={signIn.isFetching} onClick={() => void signIn.refetch()} />}
+              toolbar={
+                <FilterBar
+                  search={search}
+                  onSearchChange={setSearch}
+                  searchPlaceholder="Search sign-in events…"
+                  filters={[
+                    {
+                      id: "log-event",
+                      label: "Event",
+                      value: eventFilter,
+                      onChange: setEventFilter,
+                      options: [
+                        { value: "ALL", label: "All" },
+                        { value: "login_success", label: "Login success" },
+                        { value: "login_failed", label: "Login failed" },
+                        { value: "account_locked", label: "Account locked" },
+                        { value: "otp_verified", label: "OTP verified" },
+                        { value: "password_reset_success", label: "Password reset" },
+                      ],
+                    },
+                  ]}
+                  onClear={clearFilters}
+                  totalCount={filtered(signIn.data?.items.length ?? 0, signInRows.length)}
+                  filteredCount={signInRows.length}
+                  itemLabel="events"
+                />
+              }
+            />
+          </TabsContent>
+
+          <TabsContent value="agents" className="space-y-3">
+            <TabIntro>
+              {workspace.account ? (
+                <>
+                  AI usage and answer outcomes per agent of <span className="font-medium text-foreground">{workspace.account.name}</span>, all
+                  time. Switch the account in the sidebar.
+                </>
+              ) : (
+                "AI usage and answer outcomes per agent, all time."
+              )}
+            </TabIntro>
+            <DataTable<AgentMetric>
+              aria-label="Agent activity"
+              columns={agentColumns}
+              data={agents.isError ? [] : agentRows}
+              keyFn={(r) => r.user_id}
+              loading={workspace.isLoading || (agents.isLoading && selectedAccountId != null)}
+              itemLabel="agents"
+              defaultSort={{ key: "ai_usage_count", dir: "desc" }}
+              onRowClick={(row) => setSelectedRow(row)}
+              empty={
+                selectedAccountId == null
+                  ? { icon: Building2, title: "Select an account", description: "Choose an account in the sidebar to see its agents." }
+                  : agents.isError
+                    ? loadError("Couldn't load agent metrics", agents.error, () => void agents.refetch())
+                    : anyFilter
+                      ? noMatch
+                      : { icon: Users, title: "No agent metrics for this account" }
+              }
+              toolbarEnd={
+                selectedAccountId != null ? (
+                  <RefreshAction label="Refresh agent activity" busy={agents.isFetching} onClick={() => void agents.refetch()} />
+                ) : undefined
+              }
+              toolbar={
+                <FilterBar
+                  search={search}
+                  onSearchChange={setSearch}
+                  searchPlaceholder="Search agents…"
+                  onClear={clearFilters}
+                  totalCount={filtered(agentMetrics.length, agentRows.length)}
+                  filteredCount={agentRows.length}
+                  itemLabel="agents"
+                />
+              }
+            />
+          </TabsContent>
+
+          <TabsContent value="api">
+            <ApiRequestsPanel onRowClick={(row) => setSelectedRow(row)} />
+          </TabsContent>
+
+          <TabsContent value="rag" className="space-y-3">
+            <TabIntro>Knowledge-base retrievals behind AI answers: query, chunks found and their top score.</TabIntro>
+            <DataTable<RagRetrieval>
+              aria-label="Knowledge search"
+              columns={ragColumns}
+              data={rag.isError ? [] : ragRows}
+              keyFn={(r) => r.id}
+              loading={rag.isLoading}
+              density="compact"
+              itemLabel="retrievals"
+              defaultSort={{ key: "created_at", dir: "desc" }}
+              onRowClick={(row) => setSelectedRow(row)}
+              empty={
+                rag.isError
+                  ? loadError("Couldn't load retrievals", rag.error, () => void rag.refetch())
+                  : anyFilter
+                    ? noMatch
+                    : { icon: Search, title: "No knowledge searches recorded yet" }
+              }
+              toolbarEnd={
+                <RefreshAction
+                  label="Refresh knowledge search"
+                  busy={rag.isFetching}
+                  onClick={() => void rag.refetch()}
+                  intervalMs={LIVE_LOGS_REFRESH_MS}
+                />
+              }
+              toolbar={
+                <FilterBar
+                  search={search}
+                  onSearchChange={setSearch}
+                  searchPlaceholder="Search queries…"
+                  filters={[{ id: "rag-status", label: "Result", value: eventFilter, onChange: setEventFilter, options: statusOptions(true) }]}
+                  onClear={clearFilters}
+                  totalCount={filtered(rag.data?.items.length ?? 0, ragRows.length)}
+                  filteredCount={ragRows.length}
+                  itemLabel="retrievals"
+                />
+              }
+            />
+          </TabsContent>
+
+          <TabsContent value="ai-requests" className="space-y-6">
+            <AiMetricsPanel />
+            <section className="space-y-3" aria-labelledby="ai-requests-heading">
+              <h2 id="ai-requests-heading" className="text-base font-semibold text-foreground">
+                Requests
+              </h2>
+              <DataTable<AiRequest>
+                aria-label="AI requests"
+                columns={aiColumns}
+                data={ai.isError ? [] : aiRows}
+                keyFn={(r) => r.id}
+                loading={ai.isLoading}
+                density="compact"
+                itemLabel="requests"
+                defaultSort={{ key: "id", dir: "desc" }}
+                onRowClick={(row) => setSelectedRow(row)}
+                empty={
+                  ai.isError
+                    ? loadError("Couldn't load AI requests", ai.error, () => void ai.refetch())
+                    : anyFilter
+                      ? noMatch
+                      : { icon: Sparkles, title: "No AI requests recorded yet" }
+                }
+                toolbarEnd={
+                  <RefreshAction label="Refresh AI requests" busy={ai.isFetching} onClick={() => void ai.refetch()} intervalMs={LIVE_LOGS_REFRESH_MS} />
+                }
+                toolbar={
+                  <FilterBar
+                    search={search}
+                    onSearchChange={setSearch}
+                    searchPlaceholder="Search model, account, error…"
+                    filters={[{ id: "ai-status", label: "Result", value: eventFilter, onChange: setEventFilter, options: statusOptions(false) }]}
+                    onClear={clearFilters}
+                    totalCount={filtered(ai.data?.items.length ?? 0, aiRows.length)}
+                    filteredCount={aiRows.length}
+                    itemLabel="requests"
+                  />
+                }
+              />
+            </section>
+          </TabsContent>
+
+          <TabsContent value="errors">
+            <ErrorLogsPanel />
+          </TabsContent>
+
+          <TabsContent value="system" className="space-y-8">
+            <SystemComponentsSection />
+            <SystemResourcesSection />
+          </TabsContent>
+        </Tabs>
       )}
 
-      {showAccountPicker && accounts.length > 0 && (
-        <div className="min-w-[240px]">
-          <Label>Account</Label>
-          <Select
-            value={selectedAccountId != null ? String(selectedAccountId) : ""}
-            onChange={(e) => setAccountId(Number(e.target.value))}
-            className="mt-1"
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
-
-      {tab === "activity" && (
-        <>
-          <ErrorAlert message={activityError ? formatUserError(activityLoadError) : null} />
-          <TableFilters
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search activity…"
-            filters={[
-              {
-                id: "log-action",
-                label: "Action",
-                value: actionFilter,
-                onChange: setActionFilter,
-                options: [
-                  { value: "ALL", label: "All actions" },
-                  { value: "CREATE", label: "Create" },
-                  { value: "CREATE_TRAINEE", label: "Create trainee" },
-                  { value: "UPDATE", label: "Update" },
-                  { value: "DELETE", label: "Delete" },
-                  { value: "ASSIGN", label: "Assign" },
-                  { value: "UNASSIGN", label: "Unassign" },
-                ],
-              },
-              {
-                id: "log-entity",
-                label: "Entity",
-                value: entityFilter,
-                onChange: setEntityFilter,
-                options: [
-                  { value: "ALL", label: "All entities" },
-                  { value: "user", label: "User" },
-                  { value: "account_user", label: "Account user" },
-                  { value: "account", label: "Account" },
-                  { value: "organization", label: "Organization" },
-                ],
-              },
-            ]}
-            onClear={clearFilters}
-            totalCount={activityData?.items.length ?? 0}
-            filteredCount={activityRows.length}
-          />
-          <DataTable
-            columns={activityColumns}
-            data={activityRows}
-            keyFn={(r) => r.id}
-            loading={activityLoading}
-            emptyMessage="No activity recorded yet."
-            onRowClick={(row) => setSelectedRow(row)}
-          />
-        </>
-      )}
-
-      {tab === "sign-in" && (
-        <>
-          <ErrorAlert message={signInError ? formatUserError(signInLoadError) : null} />
-          <TableFilters
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search sign-in events…"
-            filters={[
-              {
-                id: "log-event",
-                label: "Event",
-                value: eventFilter,
-                onChange: setEventFilter,
-                options: [
-                  { value: "ALL", label: "All events" },
-                  { value: "login_success", label: "Login success" },
-                  { value: "login_failed", label: "Login failed" },
-                  { value: "account_locked", label: "Account locked" },
-                  { value: "otp_verified", label: "OTP verified" },
-                  { value: "password_reset_success", label: "Password reset" },
-                ],
-              },
-            ]}
-            onClear={clearFilters}
-            totalCount={signInData?.items.length ?? 0}
-            filteredCount={signInRows.length}
-          />
-          <DataTable
-            columns={signInColumns}
-            data={signInRows}
-            keyFn={(r) => r.id}
-            loading={signInLoading}
-            emptyMessage="No sign-in events recorded."
-            onRowClick={(row) => setSelectedRow(row)}
-          />
-        </>
-      )}
-
-      {tab === "agents" && (
-        <>
-          <TableFilters
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search agents…"
-            filters={[]}
-            onClear={clearFilters}
-            totalCount={agentMetrics.length}
-            filteredCount={agentRows.length}
-          />
-          <DataTable
-            columns={agentColumns}
-            data={agentRows}
-            keyFn={(r) => r.user_id}
-            loading={agentsLoading}
-            emptyMessage={selectedAccountId ? "No agent metrics for this account." : "Select an account."}
-            onRowClick={(row) => setSelectedRow(row)}
-          />
-        </>
-      )}
-
-      {tab === "api" && <ApiRequestsPanel onRowClick={(row) => setSelectedRow(row)} />}
-
-      {tab === "rag" && (
-        <>
-          <RefreshButton onClick={() => refetchRag()} busy={ragFetching} />
-          <ErrorAlert message={ragError ? formatUserError(ragLoadError) : null} />
-          <TableFilters
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search retrievals…"
-            filters={[
-              {
-                id: "rag-status",
-                label: "Status",
-                value: eventFilter,
-                onChange: setEventFilter,
-                options: [
-                  { value: "ALL", label: "All statuses" },
-                  { value: "SUCCESS", label: "Success" },
-                  { value: "EMPTY", label: "Empty (no chunks)" },
-                  { value: "FAILED", label: "Failed" },
-                ],
-              },
-            ]}
-            onClear={clearFilters}
-            totalCount={ragData?.items.length ?? 0}
-            filteredCount={ragRows.length}
-          />
-          <DataTable
-            columns={ragColumns}
-            data={ragRows}
-            keyFn={(r) => r.id}
-            loading={ragLoading}
-            emptyMessage="No RAG retrievals recorded yet."
-            onRowClick={(row) => setSelectedRow(row)}
-          />
-        </>
-      )}
-
-      {tab === "ai-requests" && (
-        <>
-          <AiMetricsPanel />
-          <RefreshButton onClick={() => refetchAi()} busy={aiFetching} />
-          <ErrorAlert message={aiError ? formatUserError(aiLoadError) : null} />
-          <TableFilters
-            search={search}
-            onSearchChange={setSearch}
-            searchPlaceholder="Search AI requests…"
-            filters={[
-              {
-                id: "ai-status",
-                label: "Status",
-                value: eventFilter,
-                onChange: setEventFilter,
-                options: [
-                  { value: "ALL", label: "All statuses" },
-                  { value: "SUCCESS", label: "Success" },
-                  { value: "FAILED", label: "Failed" },
-                ],
-              },
-            ]}
-            onClear={clearFilters}
-            totalCount={aiData?.items.length ?? 0}
-            filteredCount={aiRows.length}
-          />
-          <DataTable
-            columns={aiColumns}
-            data={aiRows}
-            keyFn={(r) => r.id}
-            loading={aiLoading}
-            emptyMessage="No AI requests recorded yet."
-            onRowClick={(row) => setSelectedRow(row)}
-          />
-        </>
-      )}
-
-      {tab === "errors" && <ErrorLogsPanel />}
-
-      {tab === "system" && (
-        <div className="space-y-6">
-          <SystemComponentsSection />
-          <SystemResourcesSection />
-        </div>
-      )}
-
-      <Dialog open={selectedRow !== null} onOpenChange={(open) => !open && setSelectedRow(null)}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
-          <DialogHeader className="flex items-start justify-between gap-4">
-            <div>
-              <DialogTitle>Log details</DialogTitle>
-              <p className="mt-1 text-sm text-slate-500">
-                Detailed fields for the selected log entry.
-              </p>
-            </div>
-            <DialogClose onClose={() => setSelectedRow(null)} />
-          </DialogHeader>
-          {selectedRow ? (
-            <div className="space-y-4">{renderDetails(selectedRow)}</div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <LogDetailsSheet row={selectedRow} onClose={() => setSelectedRow(null)} />
+    </Page>
   );
 }
